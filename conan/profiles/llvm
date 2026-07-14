@@ -1,0 +1,14 @@
+{% set detected_os = detect_api.detect_os() %}
+
+[settings]
+os={{ detected_os }}
+arch={{ detect_api.detect_arch() }}
+build_type=Debug
+compiler=clang
+compiler.version=22
+compiler.cppstd=23
+compiler.libcxx={{ "libc++" if detected_os == "Macos" else "libstdc++11" }}
+
+[conf]
+tools.build:compiler_executables={"c": "clang", "cpp": "clang++"}
+tools.cmake.cmaketoolchain:generator=Ninja

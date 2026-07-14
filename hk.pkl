@@ -1,0 +1,47 @@
+amends "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Builtins.pkl"
+
+local cpp_files = List(
+  "include/**/*.hpp",
+  "src/**/*.cpp",
+  "tests/**/*.cpp",
+  "benchmarks/**/*.cpp",
+)
+
+local cpp_sources = List(
+  "src/**/*.cpp",
+  "tests/**/*.cpp",
+  "benchmarks/**/*.cpp",
+)
+
+local checks = new Mapping<String, Step> {
+  ["clang-format"] = (Builtins.clang_format) {
+    glob = cpp_files
+  }
+  ["clang-tidy"] {
+    glob = cpp_sources
+    check = "clang-tidy --quiet -p build/debug {{files}}"
+  }
+  ["clangd"] {
+    glob = List("include/**/*.hpp", "src/**/*.cpp")
+    check = "cmake/check-clangd.sh {{files}}"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = checks
+  }
+  ["pre-push"] {
+    steps = checks
+  }
+  ["check"] {
+    steps = checks
+  }
+  ["fix"] {
+    fix = true
+    steps = checks
+  }
+}
