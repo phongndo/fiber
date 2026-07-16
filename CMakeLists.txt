@@ -47,7 +47,17 @@ target_compile_options(
 # libghostty-vt remains pinned and built from the vendored Ghostty source.
 add_subdirectory(vendor/ghostty EXCLUDE_FROM_ALL SYSTEM)
 
-add_library(fiber_lib src/fiber.cpp)
+find_package(lua CONFIG REQUIRED)
+find_package(zstd CONFIG REQUIRED)
+
+add_library(
+  fiber_lib
+  src/assert.cpp
+  src/config.cpp
+  src/fiber.cpp
+  src/mux/single_pane.cpp
+  src/vt/terminal.cpp
+)
 add_library(fiber::lib ALIAS fiber_lib)
 target_include_directories(
   fiber_lib
@@ -55,7 +65,11 @@ target_include_directories(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
 )
-target_link_libraries(fiber_lib PUBLIC ghostty-vt-static PRIVATE fiber_warnings)
+target_link_libraries(
+  fiber_lib
+  PUBLIC ghostty-vt-static
+  PRIVATE fiber_warnings lua::lua zstd::libzstd_static
+)
 
 add_executable(fiber src/main.cpp)
 target_link_libraries(fiber PRIVATE fiber::lib fiber_warnings)
@@ -65,7 +79,13 @@ if(FIBER_BUILD_TESTS)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
 
-  add_executable(fiber_tests tests/fiber_test.cpp)
+  add_executable(
+    fiber_tests
+    tests/config_test.cpp
+    tests/core_test.cpp
+    tests/fiber_test.cpp
+    tests/terminal_test.cpp
+  )
   target_link_libraries(
     fiber_tests
     PRIVATE fiber::lib fiber_warnings GTest::gtest_main GTest::gmock

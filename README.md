@@ -1,6 +1,16 @@
 # fiber
 
-A strict C++23 starting point backed by the vendored `libghostty-vt` library.
+A bounded, data-oriented C++23 foundation for a fast terminal multiplexer, backed by the
+vendored `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstandard supports
+bounded snapshots and application-owned compressed state.
+
+The current vertical slice provides named persistent sessions, each with one PTY pane and start,
+attach, detach, list, and kill commands, plus release-enabled invariant assertions, generational
+IDs, bounded byte queues,
+and an isolated Ghostty terminal adapter. The adapter owns the canonical terminal and dirty render
+state, captures terminal effects into bounded queues, and enforces a quota-tracked allocator. See
+[`docs/architecture.md`](docs/architecture.md) for the ownership model and system invariants, and
+[`docs/performance.md`](docs/performance.md) for measured renderer and multiplexer results.
 
 ## Toolchain
 
@@ -29,8 +39,10 @@ Subsequent C++ compilations use ccache.
 
 ```sh
 just configure              # Conan install + CMake/Ninja generation
-just build                  # Debug build (use `profile=release` for release)
-just run                    # Run fiber
+just build                  # Debug build (`just profile=release build` for release)
+just run                    # Show fiber usage
+just demo                   # Run the scripted libghostty-vt demo
+just build && ./build/debug/fiber new  # Start and attach to pane 0
 just test                   # GoogleTest and GoogleMock
 just bench                  # Google Benchmark
 just fmt                    # Apply clang-format and nixpkgs-fmt
@@ -42,8 +54,26 @@ just check                  # All format, lint, LSP, build, and test checks
 just hooks                  # Validate hk config and install Git hooks
 ```
 
-For example, use `just build profile=release` or `just bench profile=release`
+For example, use `just profile=release build` or `just profile=release bench`
 for an optimized build.
+
+## Single-pane mux
+
+```sh
+./build/debug/fiber new work       # start session "work" and attach
+# Press C-b d to detach.
+./build/debug/fiber new logs       # create another independent session
+./build/debug/fiber list           # list all sessions
+./build/debug/fiber attach work    # reattach to work
+./build/debug/fiber kill work      # stop one session
+./build/debug/fiber kill-all       # stop every session
+```
+
+Each session currently owns one pane and permits one attached client. It starts the account's login
+shell, preserves the launch environment, advertises `xterm-256color`, and forwards terminal resizing
+to the PTY. Session names contain 1-32 ASCII letters, digits, underscores, or hyphens. `C-b C-b`
+sends a literal `C-b`. Launch `fiber` directly from the normal shell rather
+than through `nix develop` when testing personal shell configuration.
 
 ## Editor and commit hooks
 

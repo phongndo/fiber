@@ -10,5 +10,9 @@ TEST(FiberTest, HasGreeting) { EXPECT_THAT(greeting(), testing::StrEq("Hello, wo
 
 TEST(FiberTest, LinksVendoredGhosttyVt) { EXPECT_FALSE(ghostty_version().empty()); }
 
+TEST(FiberTest, LinksLuaConfigRuntime) { EXPECT_THAT(lua_version(), testing::HasSubstr("5.5")); }
+
+TEST(FiberTest, LinksZstd) { EXPECT_THAT(zstd_version(), testing::StrEq("1.5.7")); }
+
 } // namespace
 } // namespace fiber

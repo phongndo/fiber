@@ -1,6 +1,8 @@
 #include "fiber/fiber.hpp"
 
 #include <ghostty/vt.h>
+#include <lua.h>
+#include <zstd.h>
 
 namespace fiber {
 
@@ -14,5 +16,9 @@ namespace fiber {
 
   return {version.ptr, version.len};
 }
+
+[[nodiscard]] auto lua_version() noexcept -> std::string_view { return LUA_VERSION; }
+
+[[nodiscard]] auto zstd_version() noexcept -> std::string_view { return ZSTD_versionString(); }
 
 } // namespace fiber

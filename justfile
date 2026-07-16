@@ -38,6 +38,10 @@ build: configure
 run: build
     {{nix}} ./build/{{profile}}/fiber
 
+# Run the scripted libghostty-vt demo.
+demo: build
+    {{nix}} ./build/{{profile}}/fiber demo
+
 # Run the GoogleTest/GoogleMock suite.
 test: build
     {{nix}} ctest --preset {{profile}}
@@ -62,12 +66,13 @@ fmt-check:
 # Run clang-tidy with all diagnostics promoted to errors.
 lint: configure
     {{nix}} clang-tidy --quiet -p build/{{profile}} \
-        src/*.cpp tests/*.cpp benchmarks/*.cpp
+        src/*.cpp src/mux/*.cpp src/vt/*.cpp tests/*.cpp benchmarks/*.cpp
 
 # Check public headers and production translation units through clangd.
 lsp-check: configure
     {{nix}} cmake/check-clangd.sh \
-        include/fiber/*.hpp src/*.cpp
+        include/fiber/*.hpp include/fiber/mux/*.hpp include/fiber/vt/*.hpp \
+        src/*.cpp src/vt/*.cpp
 
 # Start clangd for editor integrations.
 lsp:
