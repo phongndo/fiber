@@ -7,9 +7,9 @@ CMakeUserPresets.json
 
 # Zig and Ghostty generated output
 /.zig-cache/
-/vendor/ghostty/.zig-cache/
-/vendor/ghostty/zig-cache/
-/vendor/ghostty/zig-out/
+/third_party/ghostty/.zig-cache/
+/third_party/ghostty/zig-cache/
+/third_party/ghostty/zig-out/
 
 # Nix
 /result

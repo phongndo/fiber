@@ -33,7 +33,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
             result["workflows"] = True
 
         # Production code and the vendored terminal library feed both binaries.
-        if path.startswith(("include/", "src/", "vendor/ghostty")):
+        if path.startswith(("include/", "src/", "third_party/ghostty")):
             result["cpp"] = True
             result["benchmarks"] = True
 

@@ -54,7 +54,7 @@ class CiChangesTests(unittest.TestCase):
 
     def test_dependency_change_selects_both_build_modes(self):
         self.assertEqual(
-            self.selected("conan.lock", "vendor/ghostty"),
+            self.selected("conan.lock", "third_party/ghostty"),
             {"cpp", "benchmarks"},
         )
 

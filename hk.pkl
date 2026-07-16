@@ -42,7 +42,7 @@ local buildImpact = List(
   "conanfile.py",
   "flake.nix",
   "flake.lock",
-  "vendor/ghostty",
+  "third_party/ghostty",
 )
 
 local ciImpact = List(

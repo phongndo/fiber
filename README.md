@@ -33,7 +33,7 @@ just test
 ```
 
 The first build lets Conan 2 download/build its pinned packages and lets Zig
-build the pinned Ghostty source under [`vendor/ghostty`](vendor/ghostty).
+build the pinned Ghostty source under [`third_party/ghostty`](third_party/ghostty).
 Subsequent C++ compilations use ccache.
 
 ## Commands
@@ -113,5 +113,5 @@ for one command only when necessary with `HK=0 git commit` or `HK=0 git push`.
 Ghostty is a Git submodule pinned to commit
 `55a3e33ab26a23d75b274b23c7f76d837db00578`. Its CMake wrapper invokes Zig to
 produce `libghostty-vt`; fiber links the static target. Update it deliberately
-by checking out a reviewed Ghostty commit in `vendor/ghostty` and committing the
+by checking out a reviewed Ghostty commit in `third_party/ghostty` and committing the
 new submodule pointer.

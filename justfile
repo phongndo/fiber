@@ -114,5 +114,5 @@ hooks-fix:
 # Remove generated build and vendored Zig output.
 clean:
     rm -rf build CMakeUserPresets.json .zig-cache \
-        vendor/ghostty/.zig-cache vendor/ghostty/zig-out vendor/ghostty/zig-pkg
+        third_party/ghostty/.zig-cache third_party/ghostty/zig-out third_party/ghostty/zig-pkg
     {{ nix }} ccache --clear

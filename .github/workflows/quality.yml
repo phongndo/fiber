@@ -99,7 +99,7 @@ jobs:
             ${{ env.CONAN_HOME }}
             ${{ env.CCACHE_DIR }}
             .zig-cache
-            vendor/ghostty/.zig-cache
+            third_party/ghostty/.zig-cache
           key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
           restore-keys: |
             fiber-v1-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-
@@ -115,7 +115,7 @@ jobs:
             ${{ env.CONAN_HOME }}
             ${{ env.CCACHE_DIR }}
             .zig-cache
-            vendor/ghostty/.zig-cache
+            third_party/ghostty/.zig-cache
           key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
 
   benchmarks:
@@ -146,7 +146,7 @@ jobs:
             ${{ env.CONAN_HOME }}
             ${{ env.CCACHE_DIR }}
             .zig-cache
-            vendor/ghostty/.zig-cache
+            third_party/ghostty/.zig-cache
           key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
           restore-keys: |
             fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-
@@ -162,7 +162,7 @@ jobs:
             ${{ env.CONAN_HOME }}
             ${{ env.CCACHE_DIR }}
             .zig-cache
-            vendor/ghostty/.zig-cache
+            third_party/ghostty/.zig-cache
           key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
 
   gate:

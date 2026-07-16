@@ -45,7 +45,7 @@ target_compile_options(
 )
 
 # libghostty-vt remains pinned and built from the vendored Ghostty source.
-add_subdirectory(vendor/ghostty EXCLUDE_FROM_ALL SYSTEM)
+add_subdirectory(third_party/ghostty EXCLUDE_FROM_ALL SYSTEM)
 
 find_package(lua CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
