@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly cpp_roots=(include src tests benchmarks)
+
+# Fail before dependency setup when source or Nix formatting is wrong.
+find "${cpp_roots[@]}" -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 |
+  xargs -0 clang-format --dry-run --Werror
+nixpkgs-fmt --check flake.nix
+just --fmt --check --unstable --justfile justfile
+hk validate
+nix flake check --no-build
+
+scripts/ci/configure debug \
+  -DFIBER_BUILD_TESTS=ON \
+  -DFIBER_BUILD_BENCHMARKS=OFF
+cmake --build --preset debug
+ctest --preset debug --no-tests=error
+
+find src tests -type f -name '*.cpp' -print0 |
+  xargs -0 clang-tidy --quiet -p build/debug
+
+# LLVM 22's isolated checker reports internal code-action failures on the
+# POSIX macro-heavy mux implementation. The compiler and clang-tidy still cover
+# it; clangd checks every public header and the remaining production sources.
+find include src -type f \( -name '*.hpp' -o -name '*.cpp' \) \
+  ! -path 'src/mux/single_pane.cpp' -print0 |
+  sort -z |
+  xargs -0 cmake/check-clangd.sh
+
+# Exercise command dispatch without opening a PTY or creating persistent state.
+./build/debug/fiber >/dev/null

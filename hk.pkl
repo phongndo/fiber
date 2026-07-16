@@ -1,47 +1,161 @@
 amends "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Config.pkl"
 import "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Builtins.pkl"
 
-local cpp_files = List(
+exclude = List(
+  "build",
+  ".cache",
+  ".conan2",
+  ".zig-cache",
+  "vendor",
+)
+
+local cppFiles = List(
   "include/**/*.hpp",
   "src/**/*.cpp",
   "tests/**/*.cpp",
   "benchmarks/**/*.cpp",
 )
 
-local cpp_sources = List(
+local cppSources = List(
   "src/**/*.cpp",
   "tests/**/*.cpp",
   "benchmarks/**/*.cpp",
 )
 
-local checks = new Mapping<String, Step> {
+local clangdFiles = List(
+  "include/**/*.hpp",
+  "src/*.cpp",
+  "src/vt/*.cpp",
+)
+
+local buildImpact = List(
+  ".gitmodules",
+  "include/**/*.hpp",
+  "src/**/*.cpp",
+  "tests/**/*.cpp",
+  "benchmarks/**/*.cpp",
+  "CMakeLists.txt",
+  "CMakePresets.json",
+  "cmake/**",
+  "conan/**",
+  "conan.lock",
+  "conanfile.py",
+  "flake.nix",
+  "flake.lock",
+  "vendor/ghostty",
+)
+
+local ciImpact = List(
+  ".github/workflows/**",
+  "scripts/ci/**",
+  "tools/test_ci_changes.py",
+)
+
+local hygiene = new Mapping<String, Step | Group> {
+  ["merge-conflict"] = Builtins.check_merge_conflict
+  ["private-key"] = Builtins.detect_private_key
+  ["large-file"] = Builtins.check_added_large_files
+  ["case-conflict"] = Builtins.check_case_conflict
+  ["executable-shebang"] = Builtins.check_executables_have_shebangs
+  ["symlinks"] = Builtins.check_symlinks
+  ["bom"] = Builtins.byte_order_marker
+  ["line-endings"] = Builtins.mixed_line_ending
+  ["newlines"] = Builtins.newlines
+  ["trailing-whitespace"] = Builtins.trailing_whitespace
+}
+
+// Keep pre-commit comfortably sub-second for normal C++ edits: only
+// staged-file hygiene, deterministic formatters, and cheap orchestration lint.
+local fast = new Mapping<String, Step | Group> {
+  ...hygiene
+
   ["clang-format"] = (Builtins.clang_format) {
-    glob = cpp_files
+    glob = cppFiles
   }
+
+  ["nix-format"] {
+    glob = "flake.nix"
+    check = "nixpkgs-fmt --check {{files}}"
+    fix = "nixpkgs-fmt {{files}}"
+  }
+
+  ["actionlint"] = Builtins.actionlint
+
+  ["shellcheck"] {
+    glob = "scripts/ci/*"
+    exclude = "scripts/ci/*.py"
+    check = "shellcheck {{files}}"
+  }
+
+  ["ci-contracts"] {
+    glob = ciImpact
+    check = "python3 -m unittest discover -s tools -p 'test_ci*.py'"
+  }
+
+  ["just-format"] {
+    glob = "justfile"
+    check = "just --fmt --check --unstable --justfile justfile"
+    fix = "just --fmt --unstable --justfile justfile"
+  }
+
+  ["hk-validate"] {
+    glob = "hk.pkl"
+    check = "hk validate"
+  }
+}
+
+// Pre-push adds incremental build/test and static analysis. Hook installation
+// configures the debug tree first, and the build step refreshes Conan/CMake so
+// dependency and build-system edits cannot use stale generated files.
+local full = new Mapping<String, Step | Group> {
+  ["build-test"] {
+    glob = buildImpact
+    check = "scripts/ci/configure debug -DFIBER_BUILD_TESTS=ON -DFIBER_BUILD_BENCHMARKS=ON && cmake --build --preset debug && ctest --preset debug --no-tests=error"
+    exclusive = true
+  }
+
+  // hk filters checked-out gitlinks as directories before applying globs. This
+  // unfiltered guard inspects pre-push refs so a Ghostty-only update still builds.
+  ["submodule-build-test"] {
+    check = "scripts/ci/submodule-build-test {{files}}"
+    stdin = #"{{ hook_stdin | default(value="") }}"#
+    exclusive = true
+  }
+
   ["clang-tidy"] {
-    glob = cpp_sources
+    glob = cppSources
     check = "clang-tidy --quiet -p build/debug {{files}}"
+    exclusive = true
   }
+
   ["clangd"] {
-    glob = List("include/**/*.hpp", "src/**/*.cpp")
+    glob = clangdFiles
+    // LLVM 22's isolated checker returns an internal tweak error for this
+    // macro-heavy POSIX source; the compiler and clang-tidy still cover it.
+    exclude = "src/mux/single_pane.cpp"
     check = "cmake/check-clangd.sh {{files}}"
+    exclusive = true
   }
+}
+
+local all = new Mapping<String, Step | Group> {
+  ...fast
+  ...full
 }
 
 hooks {
   ["pre-commit"] {
     fix = true
     stash = "git"
-    steps = checks
+    steps = fast
   }
-  ["pre-push"] {
-    steps = checks
-  }
-  ["check"] {
-    steps = checks
-  }
+
+  ["pre-push"] { steps = all }
+
+  ["check"] { steps = all }
+
   ["fix"] {
     fix = true
-    steps = checks
+    steps = fast
   }
 }

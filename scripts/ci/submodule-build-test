@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly zero_sha="0000000000000000000000000000000000000000"
+
+# The normal globbed build-test step handles these paths. Avoid rebuilding a
+# second time when a push contains both a regular build input and a gitlink.
+for path in "$@"; do
+  case "${path}" in
+    .gitmodules | include/*.hpp | src/*.cpp | tests/*.cpp | benchmarks/*.cpp | \
+      CMakeLists.txt | CMakePresets.json | cmake/* | conan/* | conan.lock | \
+      conanfile.py | flake.nix | flake.lock)
+      exit 0
+      ;;
+  esac
+done
+
+had_refs=false
+dependency_changed=false
+if [[ ! -t 0 ]]; then
+  while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [[ -n "${remote_sha:-}" ]] || continue
+    had_refs=true
+
+    # Deleting a remote ref does not introduce a dependency change. A new ref
+    # has no trustworthy remote endpoint, so fail safe and run the build.
+    if [[ "${local_sha}" == "${zero_sha}" ]]; then
+      continue
+    elif [[ "${remote_sha}" == "${zero_sha}" ]]; then
+      dependency_changed=true
+    elif ! git diff --quiet "${remote_sha}" "${local_sha}" -- vendor/ghostty; then
+      dependency_changed=true
+    fi
+  done
+fi
+
+if [[ "${dependency_changed}" == false ]]; then
+  # With ordinary changed files or complete pre-push refs, no gitlink change
+  # means the globbed step either handled the build or no build is required.
+  if [[ "${had_refs}" == true || "$#" -gt 0 ]]; then
+    exit 0
+  fi
+  # hk removes a checked-out gitlink from its file list because it is a
+  # directory in the worktree. With no remaining context, build conservatively.
+fi
+
+scripts/ci/configure debug -DFIBER_BUILD_TESTS=ON -DFIBER_BUILD_BENCHMARKS=ON
+cmake --build --preset debug
+ctest --preset debug --no-tests=error

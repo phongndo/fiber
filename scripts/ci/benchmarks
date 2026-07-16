@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly mode="${1:-smoke}"
+readonly output="build/release/benchmark-results.json"
+
+case "${mode}" in
+  smoke)
+    benchmark_args=(
+      --benchmark_min_time=0.01s
+      --benchmark_repetitions=1
+    )
+    ;;
+  extended)
+    benchmark_args=(
+      --benchmark_min_time=0.2s
+      --benchmark_repetitions=3
+      --benchmark_report_aggregates_only=true
+    )
+    ;;
+  *)
+    printf 'usage: %s [smoke|extended]\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+benchmark_args+=(
+  --benchmark_out="${output}"
+  --benchmark_out_format=json
+)
+
+clang-format --dry-run --Werror benchmarks/*.cpp
+scripts/ci/configure release -DFIBER_BUILD_TESTS=OFF
+cmake --build --preset release --target fiber_benchmarks
+clang-tidy --quiet -p build/release benchmarks/*.cpp
+rm -f "${output}"
+./build/release/fiber_benchmarks "${benchmark_args[@]}"
+
+if [[ ! -s "${output}" ]]; then
+  printf 'benchmark did not create %s\n' "${output}" >&2
+  exit 1
+fi
+
+python3 - "${output}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    report = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as error:
+    print(f"invalid benchmark report {path}: {error}", file=sys.stderr)
+    raise SystemExit(1) from error
+
+results = report.get("benchmarks") if isinstance(report, dict) else None
+if not isinstance(results, list) or not results or not all(isinstance(result, dict) for result in results):
+    print(f"benchmark report {path} contains no valid results", file=sys.stderr)
+    raise SystemExit(1)
+
+failures = [result for result in results if result.get("error_occurred") is True]
+for failure in failures:
+    name = failure.get("name", "<unnamed>")
+    message = failure.get("error_message", "unknown error")
+    print(f"benchmark {name} failed: {message}", file=sys.stderr)
+
+raise SystemExit(bool(failures))
+PY

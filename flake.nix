@@ -31,12 +31,15 @@
               llvm.clang
               llvm.clang-tools
             ] ++ [
+              pkgs.actionlint
               pkgs.ccache
               pkgs.cmake
               pkgs.conan
               pkgs.just
               pkgs.ninja
               pkgs.nixpkgs-fmt
+              pkgs.python3
+              pkgs.shellcheck
               pkgs.zig_0_15
               hk.packages.${system}.default
             ];

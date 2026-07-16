@@ -17,9 +17,10 @@ state, captures terminal effects into bounded queues, and enforces a quota-track
 On macOS, the locked Nix shell uses the LLVM 22 installation from
 `brew --prefix llvm`; it does not install or select Nix's Clang. On Linux, the
 shell supplies the matching Nix LLVM 22 toolchain. It also supplies CMake,
-Ninja, ccache, Conan 2, Zig (required to build `libghostty-vt`), hk, and the
-formatters. Conan supplies GoogleTest, GoogleMock, and Google Benchmark. CMake
-rejects non-LLVM C++ compilers, requires C++23 without compiler extensions,
+Ninja, ccache, Conan 2, Zig (required to build `libghostty-vt`), hk, Python,
+actionlint, ShellCheck, and the formatters. Conan supplies GoogleTest,
+GoogleMock, and Google Benchmark. CMake rejects non-LLVM C++ compilers,
+requires C++23 without compiler extensions,
 exports the compilation database for clangd, and promotes the strict warning
 set to errors.
 
@@ -51,11 +52,22 @@ just lint                   # clang-tidy; every diagnostic is an error
 just lsp-check              # clangd parse/diagnostic check
 just lsp                    # Start clangd for an editor
 just check                  # All format, lint, LSP, build, and test checks
-just hooks                  # Validate hk config and install Git hooks
+just ci-check               # Reproduce every merge-blocking CI lane
+just hooks                  # Configure and install fast commit/push hooks
+just hooks-check            # Run fast and pre-push hk checks over all files
+just hooks-fix              # Apply safe hk format/hygiene fixes
 ```
 
 For example, use `just profile=release build` or `just profile=release bench`
 for an optimized build.
+
+## Continuous integration
+
+Pull requests and pushes to `main` run change-aware C++ correctness, benchmark
+smoke, and workflow-lint lanes behind one stable `CI gate` check. A scheduled
+extended workflow covers all four supported host platforms, sanitizers, and
+longer benchmark samples. See [`docs/ci.md`](docs/ci.md) for the lane mapping,
+branch-protection setting, and local reproduction commands.
 
 ## Single-pane mux
 
@@ -82,16 +94,19 @@ Point the editor at `clangd` from `nix develop`. [`.clangd`](.clangd) uses
 clang-tidy diagnostics, background indexing, and inlay hints. Run
 `just configure` before opening the project in an editor.
 
-[`hk.pkl`](hk.pkl) runs clang-format and clang-tidy over changed C++ files and
-runs clangd checks over changed production sources/headers on pre-commit and
-pre-push. Install it after configuration:
+[`hk.pkl`](hk.pkl) keeps pre-commit fast: it fixes staged C++/Nix/just
+formatting and runs staged-file hygiene, actionlint, ShellCheck, and CI contract
+checks only when their inputs change. Pre-push adds the slower incremental
+debug build, tests, clang-tidy, and clangd validation tier. Install both hooks
+after the debug tree is configured:
 
 ```sh
 just hooks
 ```
 
-The hook formats and re-stages changed C++ files. Bypass hk for one command only
-when necessary with `HK=0 git commit`.
+Run commits and pushes from `nix develop` so every hook tool is on `PATH`. Safe
+fixes are re-staged automatically while unstaged work is preserved. Bypass hk
+for one command only when necessary with `HK=0 git commit` or `HK=0 git push`.
 
 ## Vendored dependency
 

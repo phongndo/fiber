@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep sanitizer flags and objects out of the ordinary debug cache so running
+# this suite locally cannot change later `just build` or hook behavior.
+scripts/ci/configure sanitizers \
+  -DFIBER_BUILD_TESTS=ON \
+  -DFIBER_BUILD_BENCHMARKS=OFF
+cmake --build --preset sanitizers --target fiber fiber_tests
+
+export ASAN_OPTIONS="detect_leaks=1:strict_string_checks=1"
+export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+ctest --preset sanitizers --no-tests=error
+./build/sanitizers/fiber >/dev/null

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# < 1 )); then
+  printf 'usage: %s <debug|release|sanitizers> [cmake options ...]\n' "$0" >&2
+  exit 2
+fi
+
+readonly profile="$1"
+shift
+
+case "${profile}" in
+  debug | sanitizers)
+    readonly build_type="Debug"
+    ;;
+  release)
+    readonly build_type="Release"
+    ;;
+  *)
+    printf 'unsupported CMake profile: %s\n' "${profile}" >&2
+    exit 2
+    ;;
+esac
+
+# Project presets point at Conan's toolchain directly; suppressing the generated
+# root user preset avoids duplicate `conan-debug` names across isolated trees.
+rm -f CMakeUserPresets.json
+conan install . \
+  --lockfile=conan.lock \
+  --output-folder="build/${profile}/conan" \
+  --profile:all=conan/profiles/llvm \
+  --settings="build_type=${build_type}" \
+  --conf="tools.cmake.cmaketoolchain:user_presets=" \
+  --build=missing
+
+cmake --preset "${profile}" "$@"
