@@ -63,11 +63,11 @@ for an optimized build.
 
 ## Continuous integration
 
-Pull requests and pushes to `main` run change-aware C++ correctness, benchmark
-smoke, and workflow-lint lanes behind one stable `CI gate` check. A scheduled
-extended workflow covers all four supported host platforms, sanitizers, and
-longer benchmark samples. See [`docs/ci.md`](docs/ci.md) for the lane mapping,
-branch-protection setting, and local reproduction commands.
+Pull requests and pushes to `main` run change-aware C++ correctness and
+workflow-lint lanes behind one stable `CI gate` check. A scheduled extended
+workflow covers all four supported host platforms and sanitizers. Benchmark
+validation is temporarily local-only. See [`docs/ci.md`](docs/ci.md) for the
+lane mapping, branch-protection setting, and local reproduction commands.
 
 ## Architecture
 

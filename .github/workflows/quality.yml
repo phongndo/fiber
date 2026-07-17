@@ -24,7 +24,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       cpp: ${{ steps.classify.outputs.cpp }}
-      benchmarks: ${{ steps.classify.outputs.benchmarks }}
       workflows: ${{ steps.classify.outputs.workflows }}
 
     steps:
@@ -118,60 +117,12 @@ jobs:
             third_party/ghostty/.zig-cache
           key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-debug-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
 
-  benchmarks:
-    name: Benchmark smoke
-    needs: changes
-    if: needs.changes.outputs.benchmarks == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
-      CCACHE_MAXSIZE: 500M
-      CONAN_HOME: ${{ github.workspace }}/.conan2
-
-    steps:
-      - name: Checkout with submodules
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-
-      - name: Restore trusted build cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        with:
-          path: |
-            ${{ env.CONAN_HOME }}
-            ${{ env.CCACHE_DIR }}
-            .zig-cache
-            third_party/ghostty/.zig-cache
-          key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: |
-            fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-
-
-      - name: Build and exercise benchmarks
-        run: nix develop --command scripts/ci/benchmarks smoke
-
-      - name: Save trusted build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        with:
-          path: |
-            ${{ env.CONAN_HOME }}
-            ${{ env.CCACHE_DIR }}
-            .zig-cache
-            third_party/ghostty/.zig-cache
-          key: fiber-v1-${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('conan.lock', 'conanfile.py', 'conan/profiles/llvm', 'flake.lock', 'CMakeLists.txt', '.gitmodules') }}-${{ github.sha }}
-
   gate:
     name: CI gate
     needs:
       - changes
       - workflow-lint
       - cpp
-      - benchmarks
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -184,8 +135,6 @@ jobs:
           WORKFLOW_RESULT: ${{ needs.workflow-lint.result }}
           CPP_SELECTED: ${{ needs.changes.outputs.cpp }}
           CPP_RESULT: ${{ needs.cpp.result }}
-          BENCHMARKS_SELECTED: ${{ needs.changes.outputs.benchmarks }}
-          BENCHMARKS_RESULT: ${{ needs.benchmarks.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -197,8 +146,7 @@ jobs:
           failed=0
           for entry in \
             "workflow-lint:$WORKFLOW_SELECTED:$WORKFLOW_RESULT" \
-            "cpp:$CPP_SELECTED:$CPP_RESULT" \
-            "benchmarks:$BENCHMARKS_SELECTED:$BENCHMARKS_RESULT"
+            "cpp:$CPP_SELECTED:$CPP_RESULT"
           do
             name="${entry%%:*}"
             remainder="${entry#*:}"

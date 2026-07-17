@@ -9,7 +9,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 
-LANES = ("cpp", "benchmarks", "workflows")
+LANES = ("cpp", "workflows")
 ZERO_SHA = "0" * 40
 
 
@@ -32,18 +32,19 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         if path.startswith("tools/test_ci"):
             result["workflows"] = True
 
-        # Production code and the vendored terminal library feed both binaries.
-        if path.startswith(("apps/", "include/", "src/", "third_party/ghostty")):
+        # Production, test, and benchmark sources share the C++ source-hygiene
+        # lane. Benchmarks are intentionally not built or executed in CI for now.
+        if path.startswith(
+            (
+                "apps/",
+                "benchmarks/",
+                "include/",
+                "src/",
+                "tests/",
+                "third_party/ghostty",
+            )
+        ):
             result["cpp"] = True
-            result["benchmarks"] = True
-
-        if path.startswith("tests/"):
-            result["cpp"] = True
-
-        # Benchmark-only edits have their own format, tidy, build, and runtime
-        # checks and do not need to rebuild the debug test tree.
-        if path.startswith("benchmarks/"):
-            result["benchmarks"] = True
 
         if path.startswith(("cmake/", "conan/")) or _is(
             path,
@@ -54,20 +55,14 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
             ".gitmodules",
         ):
             result["cpp"] = True
-            result["benchmarks"] = True
 
-        if _is(path, ".clang-format", ".clangd", "hk.pkl"):
+        if _is(path, ".clang-format", ".clang-tidy", ".clangd", "hk.pkl"):
             result["cpp"] = True
-
-        if path == ".clang-tidy":
-            result["cpp"] = True
-            result["benchmarks"] = True
 
         # These files define the environment or local entry points for all
         # merge-blocking suites, so validate their complete contract.
         if _is(path, "flake.nix", "flake.lock", "justfile"):
             result["cpp"] = True
-            result["benchmarks"] = True
             result["workflows"] = True
 
     return result

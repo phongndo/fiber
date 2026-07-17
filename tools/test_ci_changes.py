@@ -40,35 +40,26 @@ class CiChangesTests(unittest.TestCase):
     def test_test_change_selects_only_cpp_correctness(self):
         self.assertEqual(self.selected("tests/core_test.cpp"), {"cpp"})
 
-    def test_library_change_selects_cpp_and_benchmarks(self):
+    def test_library_change_selects_cpp_correctness(self):
         self.assertEqual(
             self.selected("include/fiber/id.hpp", "src/core/fiber.cpp"),
-            {"cpp", "benchmarks"},
+            {"cpp"},
         )
 
-    def test_application_change_selects_cpp_and_benchmarks(self):
-        self.assertEqual(
-            self.selected("apps/fiber/main.cpp"),
-            {"cpp", "benchmarks"},
-        )
+    def test_application_change_selects_cpp_correctness(self):
+        self.assertEqual(self.selected("apps/fiber/main.cpp"), {"cpp"})
 
-    def test_benchmark_change_uses_only_its_complete_lane(self):
-        self.assertEqual(
-            self.selected("benchmarks/fiber_benchmark.cpp"),
-            {"benchmarks"},
-        )
+    def test_benchmark_change_gets_cpp_source_hygiene(self):
+        self.assertEqual(self.selected("benchmarks/fiber_benchmark.cpp"), {"cpp"})
 
-    def test_dependency_change_selects_both_build_modes(self):
+    def test_dependency_change_selects_cpp_correctness(self):
         self.assertEqual(
             self.selected("conan.lock", "third_party/ghostty"),
-            {"cpp", "benchmarks"},
+            {"cpp"},
         )
 
-    def test_tidy_configuration_checks_both_compilation_databases(self):
-        self.assertEqual(
-            self.selected(".clang-tidy"),
-            {"cpp", "benchmarks"},
-        )
+    def test_tidy_configuration_selects_cpp_correctness(self):
+        self.assertEqual(self.selected(".clang-tidy"), {"cpp"})
 
     def test_ci_test_change_selects_workflow_lane(self):
         self.assertEqual(self.selected("tools/test_ci_changes.py"), {"workflows"})

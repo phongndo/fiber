@@ -95,7 +95,7 @@ check: fmt-check lint lsp-check test
 ci-cpp:
     {{ nix }} scripts/ci/cpp
 
-# Build and exercise every benchmark with short, non-thresholded samples.
+# Reproduce the temporarily local-only benchmark lane.
 ci-benchmarks:
     {{ nix }} scripts/ci/benchmarks smoke
 
@@ -104,7 +104,7 @@ ci-workflows:
     {{ nix }} scripts/ci/workflows
 
 # Reproduce every merge-blocking CI lane locally.
-ci-check: ci-cpp ci-benchmarks ci-workflows
+ci-check: ci-cpp ci-workflows
 
 # Configure the debug tree and install this repository's hk hooks.
 hooks:

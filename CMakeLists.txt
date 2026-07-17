@@ -44,6 +44,15 @@ target_compile_options(
     -Wzero-as-null-pointer-constant
 )
 
+# Conan selects Linux's libstdc++ ABI with -stdlib=libstdc++. The Nix Clang wrapper reports the
+# otherwise valid default-library selection as unused, so suppress that driver-only diagnostic.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_compile_options(
+    fiber_warnings
+    INTERFACE -Wno-unused-command-line-argument
+  )
+endif()
+
 # libghostty-vt remains pinned and built from the third-party Ghostty source.
 add_subdirectory(third_party/ghostty EXCLUDE_FROM_ALL SYSTEM)
 

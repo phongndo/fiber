@@ -10,30 +10,24 @@ behind one stable required check:
 ```text
 Classify changes
   ├─ Workflow and CI-script lint
-  ├─ C++ correctness
-  └─ Release benchmark smoke
+  └─ C++ correctness
           ↓
        CI gate
 ```
 
 The C++ lane checks C++ and Nix formatting, evaluates the flake, installs the
 exact Conan lock, builds and tests the debug tree, runs clang-tidy and clangd,
-and smokes command dispatch. The benchmark lane independently builds the
-release benchmark target and briefly executes every registered benchmark. It
-checks compilation and runtime invariants; it does not compare timings from a
-shared GitHub runner.
+and smokes command dispatch. Benchmark builds and samples are temporarily
+excluded from GitHub Actions; the local benchmark suite remains available.
 
 The conservative mapping lives in
 [`scripts/ci/changes.py`](../scripts/ci/changes.py), with contract tests in
 [`tools/test_ci_changes.py`](../tools/test_ci_changes.py):
 
-- production headers, sources, or the Ghostty submodule select C++ and
-  benchmarks;
-- test-only changes select C++;
-- benchmark-only changes select their self-contained format, tidy, build, and
-  runtime lane without rebuilding the debug test tree;
-- CMake, Conan, and dependency changes select both build modes;
-- CI orchestration changes deliberately select every lane;
+- production headers, sources, tests, benchmark sources, or the Ghostty
+  submodule select C++ correctness;
+- CMake, Conan, and dependency changes select C++ correctness;
+- CI orchestration changes deliberately select every active lane;
 - unrelated documentation can proceed directly from classification to the
   gate.
 
@@ -54,11 +48,8 @@ It covers the four systems exported by the Nix flake:
 - `aarch64-darwin`.
 
 It also runs AddressSanitizer plus UndefinedBehaviorSanitizer on Linux in an
-isolated `build/sanitizers` tree and uploads a longer Google Benchmark JSON
-sample for 14 days. Benchmark samples
-are observational because hosted-runner timing is machine-sensitive; durable
-performance claims and local baselines remain documented in
-[`performance.md`](performance.md).
+isolated `build/sanitizers` tree. Durable performance claims and local
+baselines remain documented in [`performance.md`](performance.md).
 
 Both workflows check out the pinned Ghostty submodule and enter the locked Nix
 development environment. Actions are pinned to immutable commit SHAs and jobs
@@ -74,13 +65,13 @@ wait for a build. Pre-commit operates only on staged files, applies safe
 formatters, preserves unstaged changes, and runs hygiene/actionlint/ShellCheck
 or classifier tests only when their inputs are staged. Pre-push adds one
 incremental Conan/CMake refresh and debug build/test pass, then clang-tidy and
-clangd only for affected C++ files. Expensive release
-benchmarks, sanitizer builds, and platform matrices remain in CI.
+clangd only for affected C++ files. Sanitizer builds and platform matrices
+remain in CI; release benchmark validation is temporarily local-only.
 
 Install both hooks with `just hooks`. Use `just hooks-check` to run fast and
 pre-push checks over the entire repository, and `just hooks-fix` to apply the
-safe pre-commit-tier fixers. Run Git from `nix develop` so the pinned hook tools are on
-`PATH`.
+safe pre-commit-tier fixers. Run Git from `nix develop` so the pinned hook
+tools are on `PATH`.
 
 ## Required repository setting
 
@@ -99,16 +90,14 @@ Run the same merge-blocking suites used by Actions:
 
 ```sh
 just ci-cpp
-just ci-benchmarks
 just ci-workflows
 ```
 
-`just ci-check` runs all three. The jobs can also be invoked directly from an
+`just ci-check` runs both. The jobs can also be invoked directly from an
 already-entered `nix develop` shell:
 
 ```sh
 scripts/ci/cpp
-scripts/ci/benchmarks smoke
 scripts/ci/workflows
 ```
 
@@ -117,8 +106,10 @@ The scheduled-only suites are:
 ```sh
 scripts/ci/platform
 scripts/ci/sanitizers
-scripts/ci/benchmarks extended
 ```
+
+The paused benchmark lane can still be run locally with `just ci-benchmarks`
+or `scripts/ci/benchmarks smoke`.
 
 CI always passes `conan.lock` explicitly. If dependencies change, regenerate
 and review the lock rather than bypassing it with a partial or unlocked install.
