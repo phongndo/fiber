@@ -1,7 +1,7 @@
 # fiber
 
 A bounded, data-oriented C++23 foundation for a fast terminal multiplexer, backed by the
-vendored `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstandard supports
+pinned `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstandard supports
 bounded snapshots and application-owned compressed state.
 
 The current vertical slice provides named persistent sessions, each with one PTY pane and start,
@@ -69,6 +69,14 @@ extended workflow covers all four supported host platforms, sanitizers, and
 longer benchmark samples. See [`docs/ci.md`](docs/ci.md) for the lane mapping,
 branch-protection setting, and local reproduction commands.
 
+## Architecture
+
+Fiber is being built as a bounded, data-oriented modular monolith: one strong core, a private
+Ghostty terminal adapter, narrow platform/protocol/render boundaries, and a deferred command/event
+extension API. See [`docs/architecture.md`](docs/architecture.md) for the target design and
+[`docs/single-pane-runtime.md`](docs/single-pane-runtime.md) for its current ownership, limitations,
+and multi-pane build-out plan.
+
 ## Single-pane mux
 
 ```sh
@@ -108,7 +116,7 @@ Run commits and pushes from `nix develop` so every hook tool is on `PATH`. Safe
 fixes are re-staged automatically while unstaged work is preserved. Bypass hk
 for one command only when necessary with `HK=0 git commit` or `HK=0 git push`.
 
-## Vendored dependency
+## Third-party dependency
 
 Ghostty is a Git submodule pinned to commit
 `55a3e33ab26a23d75b274b23c7f76d837db00578`. Its CMake wrapper invokes Zig to

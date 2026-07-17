@@ -1,5 +1,5 @@
-#ifndef FIBER_VT_TERMINAL_HPP
-#define FIBER_VT_TERMINAL_HPP
+#ifndef FIBER_TERMINAL_TERMINAL_HPP
+#define FIBER_TERMINAL_TERMINAL_HPP
 
 #include "fiber/limits.hpp"
 
@@ -11,6 +11,9 @@
 #include <string_view>
 
 namespace fiber::vt {
+
+// Version of the privately linked terminal engine. The returned view has static lifetime.
+[[nodiscard]] auto library_version() noexcept -> std::span<const std::uint8_t>;
 
 enum class Error : std::uint8_t {
   invalid_options,
@@ -209,4 +212,4 @@ private:
 
 } // namespace fiber::vt
 
-#endif // FIBER_VT_TERMINAL_HPP
+#endif // FIBER_TERMINAL_TERMINAL_HPP

@@ -1,91 +1,236 @@
 # Fiber architecture
 
-Fiber is a bounded, data-oriented terminal multiplexer. The daemon owns PTYs, terminal state,
-sessions, layouts, commands, and per-client render state. A disposable client owns raw terminal
-mode and forwards input, resize events, and daemon-produced terminal bytes.
+This document defines Fiber's intended architecture. It is a contract for contributors and coding
+agents, not a claim that every component already exists. The current executable is a single-pane
+runtime documented in [`single-pane-runtime.md`](single-pane-runtime.md).
 
-## Invariants
+## Product goal
 
-1. Every mutable object has one owner.
+Fiber is a bounded, data-oriented terminal multiplexer with a small, extremely fast core and an
+extension boundary that does not compromise latency, ownership, or memory safety.
+
+The design is a **modular monolith**:
+
+- one process owns the authoritative mux state;
+- one engine coordinates state transitions and I/O;
+- hot data remains dense and locally owned;
+- subsystems have explicit dependency boundaries;
+- extensions communicate through commands, events, and immutable values;
+- components are not independent services and do not require virtual interfaces.
+
+The architecture deliberately avoids both a giant implementation file and a graph of tiny service
+objects.
+
+## Non-negotiable invariants
+
+1. Every mutable object has exactly one owner.
 2. Every queue has byte and element bounds.
 3. Every event-loop stage has a work bound.
 4. A client or extension can never block PTY progress.
 5. Generational IDs are validated at trust boundaries.
 6. State transitions are explicit and exhaustive.
 7. Rendering visits only affected clients and rows.
-8. Steady-state hot paths do not use the general heap.
+8. Steady-state hot paths avoid the general heap.
 9. Nondeterminism is isolated so event-loop executions can be replayed.
-10. Capacity exhaustion is a normal, tested result.
+10. Capacity exhaustion is a normal, observable, tested result.
+11. Foreign-library types never cross their adapter boundary.
+12. Extension code never executes inside PTY parsing, composition, or output encoding.
 
-External input errors are rejected without damaging daemon state. Internal invariant violations use
+Malformed external input is rejected without damaging state. Internal invariant violations use
 release-enabled assertions and terminate rather than continuing with corrupt state.
 
-## Terminal ownership
+## Component map
 
-Each pane owns one `libghostty-vt` terminal as its canonical emulated state. Fiber uses Ghostty for
-VT parsing, screen state, scrollback, reflow, input encoding, terminal modes, and dirty render-state
-tracking. Fiber owns PTYs, layout, composition, outer-terminal encoding, and client-specific views.
+```text
+apps/fiber/main -> app -----> client -----> protocol
+                    |           |             |
+                    +------> daemon -----------+
+                               |
+                               v
+extension host -----------> core engine <----> terminal adapter ---> third_party/ghostty
+                               |   |
+                               |   +----------> renderer
+                               +--------------> platform
+```
 
-Ghostty's API is unstable, so only `src/vt/terminal.cpp` includes Ghostty headers. The public adapter
-uses Fiber value types and opaque ownership. Ghostty effects synchronously append to bounded Fiber
-queues; they never call application or extension code.
+The arrows mean “may depend on.” Cycles are forbidden.
 
-The adapter gives every pane a quota-tracked allocator. General allocations are permitted while a
-pane and its terminal are created. PTY parsing and render-state updates reuse established storage
-where the upstream API permits it. Allocation statistics and failures remain observable.
+### Core — `src/core/`
 
-## Current single-pane vertical slice
+The core is the authoritative owner of mux behavior and hot state. It will contain the engine,
+dense state stores, IDs, commands, events, bounded queues, work budgets, and scheduling policy.
+Sessions, windows, panes, clients, focus, and layouts are core data—not independently allocated
+services.
 
-The first end-to-end slice supports up to 64 named sessions. Each session is currently isolated in
-its own daemon process and Unix socket and owns one PTY and shell. This keeps failure domains and hot
-state independent while the pane/layout model is still evolving. Session discovery validates socket
-ownership and names; names are bounded to 32 safe ASCII characters.
+The core may orchestrate platform, terminal, protocol, and rendering operations. It must not know
+about CLI syntax, Lua stack details, Unix socket path conventions, or Ghostty C types.
 
-A session socket supports one attached terminal client plus independent `list` and `kill` control
-connections. Input and resize messages use a bounded binary protocol. `C-b d` detaches the client
-without terminating the shell; reattachment reconstructs the visible screen from Ghostty's
-canonical state before live output continues.
+### Terminal adapter — `src/terminal/`
 
-The current renderer consumes Ghostty dirty rows, retains bounded per-cell physical fingerprints,
-trims unchanged row prefixes and suffixes, and emits terminal scroll operations for exact vertical
-shifts. Trailing default cells use erase-line rather than space runs. PTY reads are drained in
-bounded 256 KiB batches and
-coalesced behind a 2 ms frame deadline. Steady-state client writes are nonblocking: one frame may be
-in flight while later Ghostty damage accumulates for the next frame. Application escape sequences
-never reach the outer terminal, preventing duplicate terminal-query responses and nested
-alternate-screen corruption. Common control and navigation input is normalized and re-encoded by
-Ghostty against each pane's current legacy or Kitty keyboard modes. Full-frame formatting remains
-only as a diagnostic fallback.
+The adapter is Fiber's only boundary to `libghostty-vt`. Each pane owns one adapter instance as its
+canonical emulated terminal state.
 
-## Configuration runtime
+Ghostty owns VT parsing, screen state, scrollback, reflow, grapheme/cell semantics, terminal modes,
+application input encoding, terminal query responses, and dirty terminal-state tracking. Fiber owns
+PTYs, process lifecycle, pane layout, multi-pane composition, client viewports, and outer-terminal
+output.
 
-Lua 5.5 is Fiber's configuration language. `fiber::config::load` executes source in a dedicated,
-quota-bound Lua state and compiles the returned table into typed immutable settings. Source size,
-instruction count, and allocator bytes are bounded. Only base, table, string, math, and UTF-8
-libraries are opened; file loading, process execution, dynamic native modules, debug access, and
-explicit garbage-collector control are unavailable.
+Only the adapter implementation may include Ghostty headers. Its interface uses Fiber-owned values
+and opaque ownership. `libghostty-vt` is a private implementation dependency: it is not part of
+Fiber's API and must not be linked or included directly by other components.
 
-The current typed settings cover prefix, frame coalescing delay, and scrollback limits. Startup-file
-selection, atomic reload, key tables, commands, layouts, status components, and extension
-declarations remain integration work. Lua callbacks must never run in PTY parsing, input delivery,
-or frame encoding paths.
+The adapter implementation lives in `src/terminal/terminal.cpp`; its cross-component Fiber value
+interface lives in `include/fiber/terminal/terminal.hpp`.
 
-Zstandard 1.5.7 is available for bounded session snapshots, protocol payloads, and application-owned
-history storage. Ghostty's internal scrollback compression remains owned by `libghostty-vt`.
+### Platform — `src/platform/`
 
-## Data path
+Platform code wraps the operating-system mechanisms Fiber actually uses: descriptor ownership,
+PTY creation and resizing, child processes, Unix sockets, signals, clocks, polling, and client raw
+terminal mode.
 
-Each bounded reactor turn proceeds in stages:
+This is a narrow portability seam, not a framework. Avoid abstractions for hypothetical platforms.
+Platform operations return explicit values/errors and do not mutate core state themselves.
 
-1. collect ready descriptors;
-2. read PTYs into pooled slabs;
-3. parse bounded byte batches;
-4. collect dirty pane IDs;
-5. compose dirty rows for affected clients;
-6. encode ANSI output batches;
-7. flush bounded client queues; and
-8. dispatch bounded command and event batches.
+### Protocol — `src/protocol/`
 
-The initial implementation uses one nonblocking reactor owner. Pane ownership can later be sharded
-without changing the command, ID, or terminal adapter boundaries if end-to-end benchmarks justify
-it.
+The protocol component owns bounded messages between the disposable client and the daemon:
+message schemas, encoding, incremental decoding, payload limits, and handshake rules. The current
+single-client wire format is documented in [`protocol.md`](protocol.md); the generalized protocol must add
+version and capability negotiation. Protocol code does not open sockets, discover sessions,
+dispatch core commands, or write terminal bytes.
+
+All lengths and enum values are validated before a message reaches the core.
+
+### Renderer — `src/render/`
+
+The renderer transforms terminal damage plus mux layout and client state into bounded output frames.
+It resolves pane rectangles, clips viewports, composes borders/status/overlays, diffs against each
+client's retained physical state, and encodes outer-terminal bytes.
+
+Rendering is synchronous, deterministic, and extension-free. It does not poll descriptors, write to
+sockets, mutate topology, or parse application VT streams.
+
+### Extension host — `src/extension/`
+
+Extensions register declarative key bindings, commands, event subscriptions, and bounded UI
+components. The host validates extension output and converts it into typed core commands.
+
+Extensions receive stable IDs and immutable snapshots. They never receive pointers or references to
+core arenas, terminal internals, PTYs, or sockets. Callbacks run only in a deferred, budgeted stage.
+Lua is the first host; a native C++ plugin ABI is explicitly out of scope because it would expose
+unstable internals and share the daemon's failure domain.
+
+### Application — `src/app/` and `apps/fiber/`
+
+`apps/fiber/main.cpp` is a policy-free process bootstrap that immediately delegates to
+`fiber::app::run`. The application component parses process arguments, selects client or daemon
+operations, and wires high-level components together. It owns no mux state or I/O mechanism.
+
+### Client — `src/client/`
+
+The disposable client owns raw-terminal lifetime, local input/prefix handling, resize forwarding,
+the daemon connection, outer-terminal writes, and terminal restoration. It can disappear without
+affecting daemon-owned session state.
+
+### Daemon — `src/daemon/`
+
+The daemon component owns session discovery and locking, listener lifecycle, daemonization, endpoint
+security policy, shutdown coordination, and cleanup. It lends the listener to the single-owner core
+reactor, which accepts ready connections and translates validated protocol messages into state
+transitions. The daemon does not own mux topology or become a second core engine.
+
+## Core execution model
+
+A bounded reactor turn proceeds in this order:
+
+1. collect descriptor readiness and expired deadlines;
+2. read PTYs into reusable bounded storage;
+3. feed bounded byte batches to terminal adapters;
+4. drain terminal responses into PTY write queues;
+5. decode bounded client input and control messages;
+6. apply a bounded batch of typed commands;
+7. collect dirty pane and affected-client IDs;
+8. compose and encode due client frames;
+9. flush bounded PTY and client output queues; and
+10. dispatch a bounded batch of deferred extension events.
+
+Ordering is part of the architecture. In particular, extension work occurs after latency-sensitive
+PTY and rendering work. Fairness budgets prevent one busy pane or slow client from monopolizing a
+turn.
+
+## Extension boundary
+
+The extension contract is command/event based:
+
+```text
+extension --typed command request--> core
+extension <--immutable event value-- core
+```
+
+Allowed extension capabilities are explicit. An extension may request an operation; the core
+validates IDs, permissions, payload bounds, and current state before applying it. Event delivery may
+be delayed or dropped according to a documented bounded policy.
+
+Extensions must not:
+
+- retain internal pointers;
+- directly mutate layouts or pane state;
+- read/write PTY or socket descriptors;
+- invoke terminal parsing or rendering;
+- block the event loop;
+- return unbounded strings, tables, or event batches.
+
+This boundary preserves the freedom to change core storage and scheduling without breaking the
+extension API.
+
+## Data and performance policy
+
+Prefer dense arrays, generational IDs, bitsets, fixed-capacity queues, and pooled slabs in hot state.
+Prefer value types over shared ownership. Avoid virtual dispatch in per-byte and per-cell loops.
+Batch system calls and preserve damage information rather than scanning all panes or clients.
+
+Optimization follows measurement. Every important optimization should have a benchmark or trace,
+and architectural complexity requires end-to-end evidence—not only a microbenchmark.
+
+## Build boundaries
+
+The current internal targets enforce component boundaries:
+
+- `fiber_base`: assertions and dependency-free foundations;
+- `fiber_terminal`: the sole Ghostty adapter and private Ghostty dependency;
+- `fiber_platform`: operating-system mechanisms;
+- `fiber_protocol`: bounded wire encoding and decoding;
+- `fiber_render`: retained outer-terminal frame generation;
+- `fiber_core`: authoritative engine-facing API as it is introduced;
+- `fiber_extension`: configuration and the future deferred extension host;
+- `fiber_daemon`: session transport and daemon lifecycle;
+- `fiber_client`: disposable attached-terminal behavior;
+- `fiber_app`: application parsing and composition;
+- `fiber`: the thin bootstrap at `apps/fiber/main.cpp`.
+
+Targets should remain cohesive rather than becoming one target per class. Ghostty headers and types
+must not escape `fiber_terminal`, even though static-link mechanics propagate its final archive link
+requirement.
+
+## Source placement rules
+
+- A directory represents a subsystem or ownership boundary, not a class.
+- Keep private headers beside their implementation under `src/`.
+- Put a header under `include/fiber/` only when it is a deliberate cross-component or public API.
+- Do not add empty speculative source files. The directory READMEs define destinations until code is
+  extracted.
+- New code must follow the established dependency direction; transitional coupling must be documented.
+- Structural refactors must preserve behavior and should be separated from feature changes.
+
+## Architectural test questions
+
+Before accepting a change, ask:
+
+1. Who owns every new mutable value?
+2. What bounds every new queue, payload, loop, and allocation?
+3. Can a slow client or extension delay PTY progress?
+4. Does a foreign or private type escape its component?
+5. Does this add work proportional to all panes/clients on a local change?
+6. Can the operation be represented as a typed command or immutable event?
+7. Is this abstraction required now, or is it speculative?
+8. How will correctness, capacity exhaustion, and performance be tested?

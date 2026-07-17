@@ -8,7 +8,7 @@ namespace {
 
 TEST(FiberTest, HasGreeting) { EXPECT_THAT(greeting(), testing::StrEq("Hello, world!")); }
 
-TEST(FiberTest, LinksVendoredGhosttyVt) { EXPECT_FALSE(ghostty_version().empty()); }
+TEST(FiberTest, LinksThirdPartyGhosttyVt) { EXPECT_FALSE(ghostty_version().empty()); }
 
 TEST(FiberTest, LinksLuaConfigRuntime) { EXPECT_THAT(lua_version(), testing::HasSubstr("5.5")); }
 

@@ -1,5 +1,8 @@
-#include "fiber/mux/single_pane.hpp"
-#include "fiber/vt/terminal.hpp"
+#include "app/application.hpp"
+
+#include "client/attached_client.hpp"
+#include "daemon/session.hpp"
+#include "fiber/terminal/terminal.hpp"
 
 #include <array>
 #include <charconv>
@@ -11,6 +14,7 @@
 #include <system_error>
 #include <utility>
 
+namespace fiber::app {
 namespace {
 
 void write_text(fiber::vt::Terminal& terminal, const std::string_view text) noexcept {
@@ -112,39 +116,41 @@ template <typename Integer>
     return run_demo();
   }
   if (command == "new") {
-    return fiber::mux::create_and_attach(session);
+    return daemon::ensure(session) == 0 ? client::attach(session) : 1;
   }
   if (command == "start") {
-    return fiber::mux::start(session);
+    return daemon::start(session);
   }
   if (command == "attach") {
-    return fiber::mux::attach(session);
+    return client::attach(session);
   }
   if (command == "list" || command == "ls" || command == "lookup") {
-    return named ? fiber::mux::list(session) : fiber::mux::list();
+    return named ? daemon::list(session) : daemon::list();
   }
   if (command == "kill") {
-    return fiber::mux::kill(session);
+    return daemon::kill(session);
   }
   if (command == "kill-all" && !named) {
-    return fiber::mux::kill_all();
+    return daemon::kill_all();
   }
   return print_usage();
 }
 
 } // namespace
 
-int main(const int argument_count, char** argument_values) {
+[[nodiscard]] auto run(const int argument_count, char** argument_values) -> int {
   const std::span arguments(argument_values, static_cast<std::size_t>(argument_count));
   if (arguments.size() != 2 && arguments.size() != 3) {
     return print_usage();
   }
 
   const std::string_view command(arguments.subspan(1, 1).front());
-  std::string_view session = fiber::mux::default_session;
+  std::string_view session = daemon::default_session;
   const bool named = arguments.size() == 3;
   if (named) {
     session = arguments.subspan(2, 1).front();
   }
   return dispatch(command, session, named);
 }
+
+} // namespace fiber::app

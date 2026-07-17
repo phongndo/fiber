@@ -1,4 +1,4 @@
-#include "fiber/vt/terminal.hpp"
+#include "fiber/terminal/terminal.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -186,12 +186,31 @@ TEST(TerminalTest, EncodesNormalizedLegacyAndKittyKeys) {
   ASSERT_EQ(*legacy, 1U);
   EXPECT_EQ(output.front(), std::byte{0x03});
 
+  const KeyEvent enter_as_control_m{
+      .key = Key::m,
+      .modifiers = key_modifier_control,
+      .unshifted_codepoint = 'm',
+      .text = "m",
+  };
+  const auto enter = terminal.encode_key(enter_as_control_m, output);
+  ASSERT_TRUE(enter.has_value());
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+  const std::string_view encoded_control_m(reinterpret_cast<const char*>(output.data()), *enter);
+  EXPECT_THAT(encoded_control_m, testing::StrEq("\x1B[109;5u"));
+
   write_text(terminal, "\x1B[>1u");
   const auto kitty = terminal.encode_key(control_c, output);
   ASSERT_TRUE(kitty.has_value());
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
   const std::string_view encoded(reinterpret_cast<const char*>(output.data()), *kitty);
   EXPECT_THAT(encoded, testing::StrEq("\x1B[99;5u"));
+
+  const KeyEvent enter_key{.key = Key::enter, .text = {}};
+  const auto kitty_enter = terminal.encode_key(enter_key, output);
+  ASSERT_TRUE(kitty_enter.has_value());
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+  const std::string_view encoded_enter(reinterpret_cast<const char*>(output.data()), *kitty_enter);
+  EXPECT_THAT(encoded_enter, testing::StrEq("\r"));
 }
 
 TEST(TerminalTest, KeyEncoderTracksCursorApplicationMode) {

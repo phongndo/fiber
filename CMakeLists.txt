@@ -44,35 +44,106 @@ target_compile_options(
     -Wzero-as-null-pointer-constant
 )
 
-# libghostty-vt remains pinned and built from the vendored Ghostty source.
+# libghostty-vt remains pinned and built from the third-party Ghostty source.
 add_subdirectory(third_party/ghostty EXCLUDE_FROM_ALL SYSTEM)
 
 find_package(lua CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 
+function(fiber_internal_target target)
+  target_include_directories(
+    ${target}
+    PUBLIC
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+  )
+  target_link_libraries(${target} PRIVATE fiber_warnings)
+endfunction()
+
+add_library(fiber_base STATIC src/core/assert.cpp)
+fiber_internal_target(fiber_base)
+
+# This is the only target that may include Ghostty headers. The final executable receives the
+# static archive as a link-only implementation requirement; Ghostty is not part of Fiber's API.
+add_library(fiber_terminal STATIC src/terminal/terminal.cpp)
+fiber_internal_target(fiber_terminal)
+target_link_libraries(fiber_terminal PRIVATE fiber_base ghostty-vt-static)
+
 add_library(
-  fiber_lib
-  src/assert.cpp
-  src/config.cpp
-  src/fiber.cpp
-  src/mux/single_pane.cpp
-  src/vt/terminal.cpp
+  fiber_platform STATIC
+  src/platform/io.cpp
+  src/platform/pty.cpp
+  src/platform/terminal_mode.cpp
 )
-add_library(fiber::lib ALIAS fiber_lib)
-target_include_directories(
-  fiber_lib
-  PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<INSTALL_INTERFACE:include>"
+fiber_internal_target(fiber_platform)
+
+add_library(fiber_protocol STATIC src/protocol/single_pane.cpp)
+fiber_internal_target(fiber_protocol)
+target_link_libraries(fiber_protocol PRIVATE fiber_base)
+
+add_library(fiber_render STATIC src/render/single_pane.cpp)
+fiber_internal_target(fiber_render)
+target_link_libraries(fiber_render PRIVATE fiber_base fiber_platform fiber_terminal)
+
+add_library(fiber_extension STATIC src/extension/config.cpp)
+fiber_internal_target(fiber_extension)
+target_link_libraries(fiber_extension PRIVATE fiber_base lua::lua)
+
+add_library(
+  fiber_core STATIC
+  src/core/engine.cpp
+  src/core/fiber.cpp
+  src/core/input.cpp
 )
+fiber_internal_target(fiber_core)
 target_link_libraries(
-  fiber_lib
-  PUBLIC ghostty-vt-static
-  PRIVATE fiber_warnings lua::lua zstd::libzstd_static
+  fiber_core
+  PRIVATE
+    fiber_base
+    fiber_platform
+    fiber_protocol
+    fiber_render
+    fiber_terminal
+    lua::lua
+    zstd::libzstd_static
 )
 
-add_executable(fiber src/main.cpp)
-target_link_libraries(fiber PRIVATE fiber::lib fiber_warnings)
+add_library(fiber_daemon STATIC src/daemon/session.cpp)
+fiber_internal_target(fiber_daemon)
+target_link_libraries(
+  fiber_daemon
+  PRIVATE fiber_base fiber_core fiber_platform fiber_protocol
+)
+
+add_library(fiber_client STATIC src/client/attached_client.cpp)
+fiber_internal_target(fiber_client)
+target_link_libraries(
+  fiber_client
+  PRIVATE fiber_daemon fiber_platform fiber_protocol
+)
+
+add_library(fiber_app STATIC src/app/application.cpp)
+fiber_internal_target(fiber_app)
+target_link_libraries(fiber_app PRIVATE fiber_client fiber_daemon fiber_terminal)
+
+# Compatibility aggregate for existing tests and embedders. New internal code should depend on the
+# narrow component target it uses rather than this aggregate.
+add_library(fiber_lib INTERFACE)
+add_library(fiber::lib ALIAS fiber_lib)
+target_link_libraries(
+  fiber_lib
+  INTERFACE fiber_core fiber_extension fiber_terminal
+)
+target_include_directories(
+  fiber_lib
+  INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:include>"
+)
+
+add_executable(fiber apps/fiber/main.cpp)
+target_link_libraries(fiber PRIVATE fiber_app fiber_warnings)
 
 if(FIBER_BUILD_TESTS)
   enable_testing()
@@ -82,13 +153,15 @@ if(FIBER_BUILD_TESTS)
   add_executable(
     fiber_tests
     tests/config_test.cpp
+    tests/core_input_test.cpp
     tests/core_test.cpp
     tests/fiber_test.cpp
+    tests/protocol_test.cpp
     tests/terminal_test.cpp
   )
   target_link_libraries(
     fiber_tests
-    PRIVATE fiber::lib fiber_warnings GTest::gtest_main GTest::gmock
+    PRIVATE fiber::lib fiber_protocol fiber_warnings GTest::gtest_main GTest::gmock
   )
   gtest_discover_tests(fiber_tests)
 endif()

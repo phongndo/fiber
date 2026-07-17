@@ -1,7 +1,7 @@
 nix := "nix develop --command"
 profile := "debug"
 build_type := if profile == "release" { "Release" } else { "Debug" }
-cpp_files := "include src tests benchmarks"
+cpp_files := "apps include src tests benchmarks"
 
 _default:
     @just --list
@@ -68,14 +68,21 @@ fmt-check:
 
 # Run clang-tidy with all diagnostics promoted to errors.
 lint: configure
-    {{ nix }} clang-tidy --quiet -p build/{{ profile }} \
-        src/*.cpp src/mux/*.cpp src/vt/*.cpp tests/*.cpp benchmarks/*.cpp
+    {{ nix }} bash -c "find apps src tests benchmarks -type f -name '*.cpp' -print0 | \
+        xargs -0 clang-tidy --quiet -p build/{{ profile }}"
 
 # Check public headers and production translation units through clangd.
 lsp-check: configure
-    {{ nix }} cmake/check-clangd.sh \
-        include/fiber/*.hpp include/fiber/mux/*.hpp include/fiber/vt/*.hpp \
-        src/*.cpp src/vt/*.cpp
+    {{ nix }} bash -c "find apps include src -type f \
+        \\( -name '*.hpp' -o -name '*.cpp' \\) \
+        ! -path 'src/client/attached_client.cpp' \
+        ! -path 'src/core/engine.cpp' \
+        ! -path 'src/core/input.cpp' \
+        ! -path 'src/daemon/session.cpp' \
+        ! -path 'src/platform/io.cpp' \
+        ! -path 'src/protocol/single_pane.cpp' \
+        ! -path 'src/render/single_pane.cpp' -print0 | sort -z | \
+        xargs -0 cmake/check-clangd.sh"
 
 # Start clangd for editor integrations.
 lsp:

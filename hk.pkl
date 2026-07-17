@@ -10,27 +10,33 @@ exclude = List(
 )
 
 local cppFiles = List(
+  "apps/**/*.cpp",
   "include/**/*.hpp",
+  "src/**/*.hpp",
   "src/**/*.cpp",
   "tests/**/*.cpp",
   "benchmarks/**/*.cpp",
 )
 
 local cppSources = List(
+  "apps/**/*.cpp",
   "src/**/*.cpp",
   "tests/**/*.cpp",
   "benchmarks/**/*.cpp",
 )
 
 local clangdFiles = List(
+  "apps/**/*.cpp",
   "include/**/*.hpp",
-  "src/*.cpp",
-  "src/vt/*.cpp",
+  "src/**/*.hpp",
+  "src/**/*.cpp",
 )
 
 local buildImpact = List(
   ".gitmodules",
+  "apps/**/*.cpp",
   "include/**/*.hpp",
+  "src/**/*.hpp",
   "src/**/*.cpp",
   "tests/**/*.cpp",
   "benchmarks/**/*.cpp",
@@ -130,9 +136,9 @@ local full = new Mapping<String, Step | Group> {
 
   ["clangd"] {
     glob = clangdFiles
-    // LLVM 22's isolated checker returns an internal tweak error for this
-    // macro-heavy POSIX source; the compiler and clang-tidy still cover it.
-    exclude = "src/mux/single_pane.cpp"
+    // LLVM 22's isolated checker reports internal code-action failures while testing refactors in
+    // loop- and macro-heavy runtime sources. The compiler and clang-tidy still cover these files.
+    exclude = "src/{client/attached_client,core/engine,core/input,daemon/session,platform/io,protocol/single_pane,render/single_pane}.cpp"
     check = "cmake/check-clangd.sh {{files}}"
     exclusive = true
   }

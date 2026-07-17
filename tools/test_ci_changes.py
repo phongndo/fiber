@@ -42,7 +42,13 @@ class CiChangesTests(unittest.TestCase):
 
     def test_library_change_selects_cpp_and_benchmarks(self):
         self.assertEqual(
-            self.selected("include/fiber/id.hpp", "src/fiber.cpp"),
+            self.selected("include/fiber/id.hpp", "src/core/fiber.cpp"),
+            {"cpp", "benchmarks"},
+        )
+
+    def test_application_change_selects_cpp_and_benchmarks(self):
+        self.assertEqual(
+            self.selected("apps/fiber/main.cpp"),
             {"cpp", "benchmarks"},
         )
 

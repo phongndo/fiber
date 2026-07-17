@@ -1,4 +1,4 @@
-#include "fiber/vt/terminal.hpp"
+#include "fiber/terminal/terminal.hpp"
 
 #include "fiber/assert.hpp"
 #include "fiber/bounded_byte_queue.hpp"
@@ -22,6 +22,15 @@
 #include <utility>
 
 namespace fiber::vt {
+
+[[nodiscard]] auto library_version() noexcept -> std::span<const std::uint8_t> {
+  GhosttyString version{};
+  if (ghostty_build_info(GHOSTTY_BUILD_INFO_VERSION_STRING, &version) != GHOSTTY_SUCCESS) {
+    return {};
+  }
+  return {version.ptr, version.len};
+}
+
 namespace {
 
 class AnsiWriter final {

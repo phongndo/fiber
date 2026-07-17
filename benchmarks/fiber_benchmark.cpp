@@ -1,5 +1,5 @@
 #include "fiber/fiber.hpp"
-#include "fiber/vt/terminal.hpp"
+#include "fiber/terminal/terminal.hpp"
 
 #include <benchmark/benchmark.h>
 
