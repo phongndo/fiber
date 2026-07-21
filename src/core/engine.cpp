@@ -371,8 +371,12 @@ void reclaim_inactive_workspaces(Workspaces& workspaces) noexcept {
 
 [[nodiscard]] auto empty_workspace_slot(Workspaces& workspaces) noexcept
     -> std::unique_ptr<Workspace>* {
-  auto* const slot = std::ranges::find(workspaces, nullptr);
-  return slot == workspaces.end() ? nullptr : &*slot;
+  for (auto& workspace : workspaces) {
+    if (workspace == nullptr) {
+      return &workspace;
+    }
+  }
+  return nullptr;
 }
 
 [[nodiscard]] auto send_all_listings(const int connection, const Workspaces& workspaces) noexcept
