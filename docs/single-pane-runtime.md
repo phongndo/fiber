@@ -28,7 +28,7 @@ monolith.
 ### Application — `src/app/`
 
 Parses commands and selects client or daemon operations. It contains the diagnostic `fiber demo`
-command but no session runtime logic. `apps/fiber/main.cpp` only delegates to `fiber::app::run`.
+command but no workspace runtime logic. `apps/fiber/main.cpp` only delegates to `fiber::app::run`.
 
 ### Client — `src/client/`
 
@@ -38,16 +38,16 @@ pane or terminal-emulator state.
 
 ### Daemon — `src/daemon/`
 
-Owns session names, per-user socket paths, discovery, locks, stale-socket validation, daemonization,
-listener lifetime, control commands, and cleanup. It creates and owns the listener, lends the
-descriptor to the core engine, and releases the endpoint when the engine finishes its reactor and
-before the engine reaps the child.
+Owns the single per-user socket path, locking, stale-socket validation, daemonization, listener
+lifetime, and cleanup. It creates and owns the listener and lends the descriptor to the core engine.
+Workspace creation, lookup, listing, and removal are handled by the authoritative engine.
 
 ### Core — `src/core/`
 
-Owns the running pane: child process, PTY, `vt::Terminal`, attached daemon-side client descriptor,
-protocol-message application, PTY drain budgets, frame scheduling, backpressure state, and child
-shutdown. The reactor borrows the daemon listener and remains the sole owner of mutable pane state.
+Owns up to 64 running workspaces in one reactor. Each currently contains one child process, PTY,
+`vt::Terminal`, attached daemon-side client descriptor, protocol-message state, frame scheduling,
+and backpressure state. The reactor borrows the daemon listener and remains the sole owner of
+mutable workspace and terminal state.
 
 ### Supporting components
 
@@ -60,8 +60,8 @@ shutdown. The reactor borrows the daemon listener and remains the sole owner of 
 
 The runtime currently provides:
 
-- up to 64 validated named sessions;
-- one shell, PTY, and canonical Ghostty terminal per session;
+- up to 64 validated named workspaces in one per-user daemon;
+- one shell, PTY, and canonical Ghostty terminal per workspace;
 - one attached client plus independent list/kill control connections;
 - detach with `C-b d` and literal prefix with `C-b C-b`;
 - terminal resize forwarding;
@@ -77,11 +77,11 @@ The runtime currently provides:
 
 The architecture is migrated, but the product remains a single-pane implementation:
 
-- one daemon process represents one session;
-- sessions have no windows or split layout tree;
+- workspaces have no task store, views, or split layout tree;
 - only one client may attach at a time;
 - the local protocol has no version or capability negotiation;
 - listener acceptance and initial attach setup still use the vertical slice's simple policy;
+- new workspaces inherit the daemon's original environment and working directory;
 - extension commands/events and configurable key tables are not integrated;
 - the renderer does not yet compose multiple pane surfaces.
 
@@ -89,12 +89,12 @@ These are feature and runtime-hardening tasks, not reasons to reorganize the sou
 
 ## Build-out sequence
 
-1. Introduce dense generational stores for sessions, windows, panes, and clients.
-2. Represent all topology changes as typed core commands.
-3. Generalize the borrowed listener integration to multiple pending and attached clients.
-4. Replace the single-pane poll set with the descriptor registry/reactor abstraction.
-5. Add split-tree layout and per-client viewport state.
-6. Generalize rendering from one terminal surface to composed pane rectangles.
+1. Introduce dense generational stores for workspaces, tasks, runs, views, and clients.
+2. Represent topology and lifecycle changes as typed core commands.
+3. Generalize listener integration to multiple pending clients without blocking workspace progress.
+4. Replace the rebuilt poll set with the descriptor registry/reactor abstraction.
+5. Add split-tree views and per-client viewport state.
+6. Generalize rendering from one terminal surface to composed surface rectangles.
 7. Version the protocol and add capabilities, request IDs, and typed errors.
 8. Add deferred, budgeted extension commands and immutable events.
 9. Add replay traces, capacity tests, fuzzing, and end-to-end latency benchmarks.

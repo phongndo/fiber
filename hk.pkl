@@ -138,7 +138,7 @@ local full = new Mapping<String, Step | Group> {
     glob = clangdFiles
     // LLVM 22's isolated checker reports internal code-action failures while testing refactors in
     // loop- and macro-heavy runtime sources. The compiler and clang-tidy still cover these files.
-    exclude = "src/{client/attached_client,core/engine,core/input,daemon/session,platform/io,protocol/single_pane,render/single_pane}.cpp"
+    exclude = "src/{client/attached_client,core/engine,core/input,daemon/server,platform/io,protocol/single_pane,render/single_pane}.cpp"
     check = "cmake/check-clangd.sh {{files}}"
     exclusive = true
   }

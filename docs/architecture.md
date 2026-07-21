@@ -59,8 +59,8 @@ The arrows mean “may depend on.” Cycles are forbidden.
 
 The core is the authoritative owner of mux behavior and hot state. It will contain the engine,
 dense state stores, IDs, commands, events, bounded queues, work budgets, and scheduling policy.
-Sessions, windows, panes, clients, focus, and layouts are core data—not independently allocated
-services.
+Workspaces, tasks, runs, views, clients, focus, and layouts are core data—not independently
+allocated services.
 
 The core may orchestrate platform, terminal, protocol, and rendering operations. It must not know
 about CLI syntax, Lua stack details, Unix socket path conventions, or Ghostty C types.
@@ -96,7 +96,7 @@ Platform operations return explicit values/errors and do not mutate core state t
 The protocol component owns bounded messages between the disposable client and the daemon:
 message schemas, encoding, incremental decoding, payload limits, and handshake rules. The current
 single-client wire format is documented in [`protocol.md`](protocol.md); the generalized protocol must add
-version and capability negotiation. Protocol code does not open sockets, discover sessions,
+version and capability negotiation. Protocol code does not open sockets, discover workspaces,
 dispatch core commands, or write terminal bytes.
 
 All lengths and enum values are validated before a message reaches the core.
@@ -130,14 +130,15 @@ operations, and wires high-level components together. It owns no mux state or I/
 
 The disposable client owns raw-terminal lifetime, local input/prefix handling, resize forwarding,
 the daemon connection, outer-terminal writes, and terminal restoration. It can disappear without
-affecting daemon-owned session state.
+affecting daemon-owned workspace state.
 
 ### Daemon — `src/daemon/`
 
-The daemon component owns session discovery and locking, listener lifecycle, daemonization, endpoint
-security policy, shutdown coordination, and cleanup. It lends the listener to the single-owner core
-reactor, which accepts ready connections and translates validated protocol messages into state
-transitions. The daemon does not own mux topology or become a second core engine.
+The daemon component owns the per-user endpoint and lock, listener lifecycle, daemonization,
+endpoint security policy, shutdown coordination, and cleanup. It lends the listener to the
+single-owner core reactor, which owns all workspaces, accepts ready connections, and translates
+validated protocol messages into state transitions. The daemon does not own workspace state or
+become a second core engine.
 
 ## Core execution model
 
@@ -203,7 +204,7 @@ The current internal targets enforce component boundaries:
 - `fiber_render`: retained outer-terminal frame generation;
 - `fiber_core`: authoritative engine-facing API as it is introduced;
 - `fiber_extension`: configuration and the future deferred extension host;
-- `fiber_daemon`: session transport and daemon lifecycle;
+- `fiber_daemon`: per-user transport and daemon lifecycle;
 - `fiber_client`: disposable attached-terminal behavior;
 - `fiber_app`: application parsing and composition;
 - `fiber`: the thin bootstrap at `apps/fiber/main.cpp`.

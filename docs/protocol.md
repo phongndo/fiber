@@ -16,16 +16,23 @@ A newly accepted connection starts with exactly one control command:
 
 | Command | Byte | Following bytes | Meaning |
 | --- | ---: | --- | --- |
-| attach | `A` | 2-byte columns, 2-byte rows | Request a streaming attachment |
-| list | `L` | none | Return a bounded human-readable listing and close |
-| kill | `K` | none | Request daemon shutdown, return confirmation, and close |
+| attach | `A` | name length, name, 2-byte columns, 2-byte rows | Attach to one workspace |
+| create | `N` | name length, name | Ensure one workspace exists |
+| list | `L` | none | List every workspace and close |
+| list workspace | `Q` | name length, name | List one workspace and close |
+| kill | `K` | name length, name | Stop one workspace and close |
+| kill all | `X` | none | Stop every workspace and close |
 
-Attach returns one byte:
+A name length is one byte and is followed by 1-32 validated ASCII workspace-name bytes. Create and
+attach return one response byte; a missing named workspace also returns `M`:
 
 | Response | Byte | Meaning |
 | --- | ---: | --- |
-| attached | `Y` | Connection has become the streaming client |
-| busy | `B` | This session already has an attached client |
+| ready | `Y` | Workspace exists, or the connection is now the streaming client |
+| busy | `B` | This workspace already has an attached client |
+| missing | `M` | The named workspace does not exist |
+| capacity | `C` | Workspace capacity is exhausted |
+| failed | `F` | Workspace creation failed |
 
 After `Y`, the daemon sends a complete reconstructed terminal frame before switching the connection
 to nonblocking live operation.
@@ -69,7 +76,7 @@ canonical terminal state. Both operations must succeed.
    1 B
 ```
 
-Detach closes only the attached connection. It does not terminate the shell or session.
+Detach closes only the attached connection. It does not terminate the shell or workspace.
 
 ## Decoder contract
 
@@ -102,7 +109,7 @@ terminal VT parsing.
 
 ## Evolution requirements
 
-Before the protocol supports multiple clients or independent release versions, add:
+Before the protocol supports multiple clients per workspace or independent release versions, add:
 
 - a magic value and protocol version;
 - explicit message lengths for every direction;

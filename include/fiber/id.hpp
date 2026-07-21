@@ -47,12 +47,12 @@ private:
   std::uint32_t generation_{0};
 };
 
-struct SessionIdTag final {};
+struct WorkspaceIdTag final {};
 struct WindowIdTag final {};
 struct PaneIdTag final {};
 struct ClientIdTag final {};
 
-using SessionId = GenerationalId<SessionIdTag>;
+using WorkspaceId = GenerationalId<WorkspaceIdTag>;
 using WindowId = GenerationalId<WindowIdTag>;
 using PaneId = GenerationalId<PaneIdTag>;
 using ClientId = GenerationalId<ClientIdTag>;

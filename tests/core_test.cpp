@@ -14,15 +14,16 @@ namespace fiber {
 namespace {
 
 TEST(GenerationalIdTest, InvalidUntilCreatedFromValidParts) {
-  const PaneId invalid;
-  const auto pane = PaneId::from_parts(7, 3);
+  const WorkspaceId invalid;
+  const auto workspace = WorkspaceId::from_parts(7, 3);
 
   EXPECT_FALSE(invalid.is_valid());
-  EXPECT_FALSE(PaneId::try_from_parts(7, 0).has_value());
-  EXPECT_FALSE(PaneId::try_from_parts(std::numeric_limits<std::uint32_t>::max(), 3).has_value());
-  EXPECT_TRUE(pane.is_valid());
-  EXPECT_EQ(pane.slot(), 7U);
-  EXPECT_EQ(pane.generation(), 3U);
+  EXPECT_FALSE(WorkspaceId::try_from_parts(7, 0).has_value());
+  EXPECT_FALSE(
+      WorkspaceId::try_from_parts(std::numeric_limits<std::uint32_t>::max(), 3).has_value());
+  EXPECT_TRUE(workspace.is_valid());
+  EXPECT_EQ(workspace.slot(), 7U);
+  EXPECT_EQ(workspace.generation(), 3U);
 }
 
 TEST(BoundedByteQueueTest, PreservesOrderAcrossWraparound) {

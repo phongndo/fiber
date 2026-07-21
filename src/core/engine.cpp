@@ -1,6 +1,7 @@
 #include "core/engine.hpp"
 
 #include "core/input.hpp"
+#include "fiber/limits.hpp"
 #include "fiber/terminal/terminal.hpp"
 #include "platform/io.hpp"
 #include "platform/pty.hpp"
@@ -15,9 +16,11 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -25,17 +28,23 @@
 
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 namespace fiber::core {
 namespace {
 
 constexpr auto command_attach = protocol::wire_byte(protocol::ControlCommand::attach);
+constexpr auto command_create = protocol::wire_byte(protocol::ControlCommand::create);
 constexpr auto command_list = protocol::wire_byte(protocol::ControlCommand::list);
+constexpr auto command_list_workspace =
+    protocol::wire_byte(protocol::ControlCommand::list_workspace);
 constexpr auto command_kill = protocol::wire_byte(protocol::ControlCommand::kill);
-constexpr auto response_attached = protocol::wire_byte(protocol::AttachResponse::attached);
-constexpr auto response_busy = protocol::wire_byte(protocol::AttachResponse::busy);
+constexpr auto command_kill_all = protocol::wire_byte(protocol::ControlCommand::kill_all);
+constexpr auto response_ready = protocol::wire_byte(protocol::ControlResponse::ready);
+constexpr auto response_busy = protocol::wire_byte(protocol::ControlResponse::busy);
+constexpr auto response_missing = protocol::wire_byte(protocol::ControlResponse::missing);
+constexpr auto response_capacity = protocol::wire_byte(protocol::ControlResponse::capacity);
+constexpr auto response_failed = protocol::wire_byte(protocol::ControlResponse::failed);
 using platform::close_descriptor;
 using platform::read_exact;
 using platform::send_all;
@@ -193,11 +202,117 @@ struct PtyDrainResult final {
   return drain;
 }
 
+struct WorkspaceName final {
+  std::array<char, protocol::workspace_name_bytes_max> bytes{};
+  std::size_t size{0};
+
+  [[nodiscard]] auto view() const noexcept -> std::string_view { return {bytes.data(), size}; }
+};
+
+[[nodiscard]] constexpr auto valid_workspace_name(const std::string_view workspace) noexcept
+    -> bool {
+  if (workspace.empty() || workspace.size() > protocol::workspace_name_bytes_max) {
+    return false;
+  }
+  return std::ranges::all_of(workspace, [](const char character) {
+    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+           (character >= '0' && character <= '9') || character == '_' || character == '-';
+  });
+}
+
+[[nodiscard]] auto read_workspace_name(const int connection) noexcept
+    -> std::optional<WorkspaceName> {
+  std::array<std::byte, 1> encoded_size{};
+  if (!read_exact(connection, encoded_size)) {
+    return std::nullopt;
+  }
+  WorkspaceName workspace;
+  workspace.size = protocol::decode_workspace_name_size(encoded_size.front());
+  if (workspace.size == 0 || workspace.size > workspace.bytes.size() ||
+      !read_exact(connection,
+                  std::as_writable_bytes(std::span(workspace.bytes).first(workspace.size))) ||
+      !valid_workspace_name(workspace.view())) {
+    return std::nullopt;
+  }
+  return workspace;
+}
+
+struct Workspace final {
+  Workspace(const std::string_view workspace_name, vt::Terminal&& created_terminal,
+            std::unique_ptr<FrameBuffer> created_frame) noexcept
+      : name_size(workspace_name.size()), terminal(std::move(created_terminal)),
+        frame(std::move(created_frame)) {
+    std::memcpy(name.data(), workspace_name.data(), workspace_name.size());
+  }
+
+  Workspace(const Workspace&) = delete;
+  auto operator=(const Workspace&) -> Workspace& = delete;
+  Workspace(Workspace&&) = delete;
+  auto operator=(Workspace&&) -> Workspace& = delete;
+
+  ~Workspace() {
+    close_descriptor(client);
+    if (child > 0) {
+      static_cast<void>(::kill(child, SIGHUP));
+      child = -1;
+    }
+    close_descriptor(pty);
+  }
+
+  [[nodiscard]] auto workspace_name() const noexcept -> std::string_view {
+    return {name.data(), name_size};
+  }
+
+  void detach_client() noexcept {
+    close_descriptor(client);
+    parser.reset();
+    output.reset();
+    frame_pending = false;
+  }
+
+  std::array<char, protocol::workspace_name_bytes_max> name{};
+  std::size_t name_size{0};
+  vt::Terminal terminal;
+  std::unique_ptr<FrameBuffer> frame;
+  ClientPacketParser parser;
+  ClientOutputState output;
+  int pty{-1};
+  pid_t child{-1};
+  int client{-1};
+  bool active{true};
+  bool frame_pending{false};
+  std::chrono::steady_clock::time_point frame_deadline;
+};
+
+[[nodiscard]] auto create_workspace(const std::string_view name) noexcept
+    -> std::unique_ptr<Workspace> {
+  vt::TerminalOptions options;
+  options.size = {.columns = 80, .rows = 24};
+  auto terminal_result = vt::Terminal::create(options);
+  if (!terminal_result.has_value()) {
+    return nullptr;
+  }
+  auto frame = std::unique_ptr<FrameBuffer>(new (std::nothrow) FrameBuffer{});
+  if (frame == nullptr) {
+    return nullptr;
+  }
+  auto workspace = std::unique_ptr<Workspace>(
+      new (std::nothrow) Workspace(name, std::move(*terminal_result), std::move(frame)));
+  if (workspace == nullptr) {
+    return nullptr;
+  }
+  workspace->child = platform::spawn_login_shell(workspace->pty);
+  if (workspace->child <= 0 || !set_nonblocking(workspace->pty)) {
+    return nullptr;
+  }
+  return workspace;
+}
+
 [[nodiscard]] auto send_safe_title(const int socket, const std::string_view title) noexcept
     -> bool {
   std::array<char, 256> sanitized{};
   std::size_t used = 0;
-  const std::span<const char> title_characters(title.data(), title.size());
+  const std::span<const char> title_characters(title);
   for (const char character :
        title_characters.first(std::min(title_characters.size(), sanitized.size()))) {
     const auto value = static_cast<unsigned char>(character);
@@ -218,206 +333,273 @@ struct PtyDrainResult final {
   return send_text(socket, std::string_view(buffer.data(), size));
 }
 
-[[nodiscard]] auto send_listing(const int socket, const std::string_view session, const pid_t child,
-                                const bool attached, const vt::Terminal& terminal) noexcept
-    -> bool {
-  const auto size = terminal.size();
-  const auto title = terminal.title();
+[[nodiscard]] auto send_listing(const int socket, const Workspace& workspace) noexcept -> bool {
+  const auto size = workspace.terminal.size();
+  const auto title = workspace.terminal.title();
   const auto title_value =
       title.has_value() && !title->empty() ? *title : std::string_view{"shell"};
-  return send_text(socket, "fiber session \"") && send_safe_title(socket, session) &&
-         send_text(socket, "\": pane 0, pid ") &&
-         send_number(socket, static_cast<std::uint64_t>(child)) &&
-         send_text(socket, attached ? ", attached, " : ", detached, ") &&
+  return send_text(socket, "fiber workspace \"") &&
+         send_safe_title(socket, workspace.workspace_name()) &&
+         send_text(socket, "\": terminal 0, pid ") &&
+         send_number(socket, static_cast<std::uint64_t>(workspace.child)) &&
+         send_text(socket, workspace.client >= 0 ? ", attached, " : ", detached, ") &&
          send_number(socket, size.columns) && send_text(socket, "x") &&
          send_number(socket, size.rows) && send_text(socket, ", title \"") &&
          send_safe_title(socket, title_value) && send_text(socket, "\"\n");
 }
 
-[[nodiscard]] auto handle_connection(const int connection, int& client,
-                                     const std::string_view session, const int pty,
-                                     const pid_t child, vt::Terminal& terminal,
-                                     ClientPacketParser& parser, FrameBuffer& frame,
-                                     ClientOutputState& output, bool& running) noexcept -> bool {
-  std::array<std::byte, 1> command{};
-  if (!read_exact(connection, command)) {
-    return true;
-  }
-  if (command.front() == command_list) {
-    return send_listing(connection, session, child, client >= 0, terminal);
-  }
-  if (command.front() == command_kill) {
-    running = false;
-    return send_text(connection, "fiber session \"") && send_safe_title(connection, session) &&
-           send_text(connection, "\" stopped\n");
-  }
-  if (command.front() != command_attach) {
-    return false;
-  }
+using Workspaces =
+    std::array<std::unique_ptr<Workspace>, static_cast<std::size_t>(limits::workspaces_hard_max)>;
 
+[[nodiscard]] auto find_workspace(Workspaces& workspaces, const std::string_view name) noexcept
+    -> Workspace* {
+  for (auto& workspace : workspaces) {
+    if (workspace != nullptr && workspace->active && workspace->workspace_name() == name) {
+      return workspace.get();
+    }
+  }
+  return nullptr;
+}
+
+void reclaim_inactive_workspaces(Workspaces& workspaces) noexcept {
+  for (auto& workspace : workspaces) {
+    if (workspace != nullptr && !workspace->active) {
+      workspace.reset();
+    }
+  }
+}
+
+[[nodiscard]] auto empty_workspace_slot(Workspaces& workspaces) noexcept
+    -> std::unique_ptr<Workspace>* {
+  auto* const slot = std::ranges::find(workspaces, nullptr);
+  return slot == workspaces.end() ? nullptr : &*slot;
+}
+
+[[nodiscard]] auto send_all_listings(const int connection, const Workspaces& workspaces) noexcept
+    -> bool {
+  std::size_t listed = 0;
+  for (const auto& workspace : workspaces) {
+    if (workspace != nullptr && workspace->active) {
+      if (!send_listing(connection, *workspace)) {
+        return false;
+      }
+      ++listed;
+    }
+  }
+  return listed > 0 || send_text(connection, "no fiber workspaces\n");
+}
+
+[[nodiscard]] auto attach_connection(const int connection, Workspace& workspace) noexcept -> bool {
   std::array<std::byte, 4> dimensions{};
   if (!read_exact(connection, dimensions)) {
     return false;
   }
-  if (client >= 0) {
+  if (workspace.client >= 0) {
     return send_all(connection, std::span(&response_busy, 1));
   }
 
   const auto requested_size = protocol::decode_dimensions(dimensions);
-  if (!apply_resize(pty, terminal, requested_size.columns, requested_size.rows) ||
-      !send_all(connection, std::span(&response_attached, 1)) ||
-      !send_frame(connection, terminal, frame, true) || !set_nonblocking(connection)) {
+  if (!apply_resize(workspace.pty, workspace.terminal, requested_size.columns,
+                    requested_size.rows) ||
+      !send_all(connection, std::span(&response_ready, 1)) ||
+      !send_frame(connection, workspace.terminal, *workspace.frame, true) ||
+      !set_nonblocking(connection)) {
+    return false;
+  }
+  workspace.client = connection;
+  workspace.parser.reset();
+  workspace.output.reset();
+  workspace.frame_pending = false;
+  return true;
+}
+
+// Control setup remains deliberately simple in the current unversioned protocol.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+[[nodiscard]] auto handle_connection(const int connection, Workspaces& workspaces) noexcept
+    -> bool {
+  std::array<std::byte, 1> command{};
+  if (!read_exact(connection, command)) {
+    return false;
+  }
+  if (command.front() == command_list) {
+    static_cast<void>(send_all_listings(connection, workspaces));
+    return false;
+  }
+  if (command.front() == command_kill_all) {
+    for (auto& workspace : workspaces) {
+      if (workspace != nullptr) {
+        workspace->active = false;
+      }
+    }
+    static_cast<void>(send_text(connection, "all fiber workspaces stopped\n"));
+    return false;
+  }
+  if (command.front() != command_attach && command.front() != command_create &&
+      command.front() != command_list_workspace && command.front() != command_kill) {
     return false;
   }
 
-  client = connection;
-  parser.reset();
-  output.reset();
-  return true;
+  const auto name = read_workspace_name(connection);
+  if (!name.has_value()) {
+    return false;
+  }
+  Workspace* workspace = find_workspace(workspaces, name->view());
+  if (command.front() == command_create) {
+    if (workspace != nullptr) {
+      static_cast<void>(send_all(connection, std::span(&response_ready, 1)));
+      return false;
+    }
+    auto* const slot = empty_workspace_slot(workspaces);
+    if (slot == nullptr) {
+      static_cast<void>(send_all(connection, std::span(&response_capacity, 1)));
+      return false;
+    }
+    auto created = create_workspace(name->view());
+    if (created == nullptr) {
+      static_cast<void>(send_all(connection, std::span(&response_failed, 1)));
+      return false;
+    }
+    *slot = std::move(created);
+    static_cast<void>(send_all(connection, std::span(&response_ready, 1)));
+    return false;
+  }
+  if (workspace == nullptr) {
+    static_cast<void>(send_all(connection, std::span(&response_missing, 1)));
+    return false;
+  }
+  if (command.front() == command_attach) {
+    return attach_connection(connection, *workspace) && workspace->client == connection;
+  }
+  if (command.front() == command_list_workspace) {
+    static_cast<void>(send_listing(connection, *workspace));
+    return false;
+  }
+
+  static_cast<void>(send_text(connection, "fiber workspace \"") &&
+                    send_safe_title(connection, workspace->workspace_name()) &&
+                    send_text(connection, "\" stopped\n"));
+  workspace->active = false;
+  return false;
+}
+
+[[nodiscard]] auto poll_timeout(const Workspaces& workspaces) noexcept -> int {
+  auto timeout = -1;
+  const auto now = std::chrono::steady_clock::now();
+  for (const auto& workspace : workspaces) {
+    if (workspace == nullptr || !workspace->active || !workspace->frame_pending ||
+        workspace->client < 0 || workspace->output.busy()) {
+      continue;
+    }
+    if (now >= workspace->frame_deadline) {
+      return 0;
+    }
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(workspace->frame_deadline - now);
+    const auto candidate = static_cast<int>(std::max(remaining.count(), std::int64_t{1}));
+    timeout = timeout < 0 ? candidate : std::min(timeout, candidate);
+  }
+  return timeout;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void process_workspace_events(Workspace& workspace, const pollfd& pty_events,
+                              const pollfd& client_events) noexcept {
+  constexpr auto frame_delay = std::chrono::milliseconds(2);
+  if ((pty_events.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+    const auto drained = drain_pty(workspace.pty, workspace.terminal);
+    workspace.active = drained.alive;
+    if (drained.changed && workspace.client >= 0 && !workspace.frame_pending) {
+      workspace.frame_pending = true;
+      workspace.frame_deadline = drained.alive ? std::chrono::steady_clock::now() + frame_delay
+                                               : std::chrono::steady_clock::now();
+    }
+  }
+
+  if (workspace.client >= 0 && (client_events.revents & POLLOUT) != 0 &&
+      !flush_frame(workspace.client, *workspace.frame, workspace.output)) {
+    workspace.detach_client();
+  }
+  if (workspace.client >= 0 && (client_events.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+    const auto parse_result =
+        workspace.parser.receive(workspace.client, workspace.pty, workspace.terminal);
+    if (parse_result != ParseResult::keep) {
+      workspace.detach_client();
+    }
+  }
+  if (workspace.frame_pending && workspace.client >= 0 && !workspace.output.busy() &&
+      std::chrono::steady_clock::now() >= workspace.frame_deadline) {
+    if (!queue_frame(workspace.client, workspace.terminal, *workspace.frame, workspace.output)) {
+      workspace.detach_client();
+    }
+    workspace.frame_pending = false;
+  }
 }
 
 // The branches are the explicit bounded stages of the current single-owner reactor.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-[[nodiscard]] auto run_session_impl(const int listener, const std::string_view session,
-                                    const EndpointRelease release_endpoint,
-                                    void* const release_context) noexcept -> int {
+[[nodiscard]] auto run_server_impl(const int listener, const EndpointRelease release_endpoint,
+                                   void* const release_context) noexcept -> int {
   EndpointReleaseGuard endpoint_release(release_endpoint, release_context);
-  vt::TerminalOptions options;
-  options.size = {.columns = 80, .rows = 24};
-  auto terminal_result = vt::Terminal::create(options);
-  if (!terminal_result.has_value()) {
-    return 1;
-  }
-  auto terminal = std::move(*terminal_result);
+  Workspaces workspaces;
+  constexpr auto descriptor_count_max =
+      std::size_t{1} + (static_cast<std::size_t>(limits::workspaces_hard_max) * 2U);
+  std::array<pollfd, descriptor_count_max> descriptors{};
+  std::array<Workspace*, static_cast<std::size_t>(limits::workspaces_hard_max)> ready_workspaces{};
 
-  int pty = -1;
-  const auto child = platform::spawn_login_shell(pty);
-  if (child <= 0) {
-    return 1;
-  }
-  if (!set_nonblocking(pty)) {
-    static_cast<void>(::kill(child, SIGHUP));
-    close_descriptor(pty);
-    endpoint_release.release();
-    static_cast<void>(::waitpid(child, nullptr, 0));
-    return 1;
-  }
-
-  auto frame = std::unique_ptr<FrameBuffer>(new (std::nothrow) FrameBuffer{});
-  if (frame == nullptr) {
-    static_cast<void>(::kill(child, SIGHUP));
-    close_descriptor(pty);
-    endpoint_release.release();
-    static_cast<void>(::waitpid(child, nullptr, 0));
-    return 1;
-  }
-
-  int client = -1;
-  bool running = true;
-  bool frame_pending = false;
-  auto frame_deadline = std::chrono::steady_clock::time_point{};
-  constexpr auto frame_delay = std::chrono::milliseconds(2);
-  ClientPacketParser parser;
-  ClientOutputState client_output;
-  while (running) {
-    int poll_timeout_ms = -1;
-    if (frame_pending && client >= 0 && !client_output.busy()) {
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= frame_deadline) {
-        poll_timeout_ms = 0;
-      } else {
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(frame_deadline - now);
-        poll_timeout_ms = static_cast<int>(std::max(remaining.count(), std::int64_t{1}));
+  while (true) {
+    std::size_t descriptor_count = 1;
+    std::size_t ready_workspace_count = 0;
+    descriptors.front() = {.fd = listener, .events = POLLIN, .revents = 0};
+    for (const auto& workspace : workspaces) {
+      if (workspace == nullptr) {
+        continue;
       }
+      const auto client_events =
+          static_cast<short>(POLLIN | (workspace->output.busy() ? static_cast<short>(POLLOUT) : 0));
+      std::span(ready_workspaces).subspan(ready_workspace_count, 1).front() = workspace.get();
+      ++ready_workspace_count;
+      std::span(descriptors).subspan(descriptor_count, 1).front() = {
+          .fd = workspace->pty, .events = POLLIN, .revents = 0};
+      ++descriptor_count;
+      std::span(descriptors).subspan(descriptor_count, 1).front() = {
+          .fd = workspace->client, .events = client_events, .revents = 0};
+      ++descriptor_count;
     }
 
-    const auto client_poll_events =
-        static_cast<short>(POLLIN | (client_output.busy() ? static_cast<short>(POLLOUT) : 0));
-    std::array<pollfd, 3> descriptors{{
-        {.fd = listener, .events = POLLIN, .revents = 0},
-        {.fd = pty, .events = POLLIN, .revents = 0},
-        {.fd = client, .events = client_poll_events, .revents = 0},
-    }};
-    const auto poll_result = ::poll(descriptors.data(), descriptors.size(), poll_timeout_ms);
+    const auto poll_result =
+        ::poll(descriptors.data(), static_cast<nfds_t>(descriptor_count), poll_timeout(workspaces));
     if (poll_result < 0) {
       if (errno == EINTR) {
         continue;
       }
-      break;
+      return 1;
     }
 
-    const auto& listener_events = descriptors.front();
-    const auto& pty_events = std::span(descriptors).subspan<1, 1>().front();
-    const auto& client_events = descriptors.back();
-    if ((listener_events.revents & POLLIN) != 0) {
+    for (std::size_t index = 0; index < ready_workspace_count; ++index) {
+      auto* const workspace = std::span(ready_workspaces).subspan(index, 1).front();
+      const auto& pty_events = std::span(descriptors).subspan(1U + (index * 2U), 1).front();
+      const auto& client_events = std::span(descriptors).subspan(2U + (index * 2U), 1).front();
+      process_workspace_events(*workspace, pty_events, client_events);
+    }
+
+    reclaim_inactive_workspaces(workspaces);
+
+    if ((descriptors.front().revents & POLLIN) != 0) {
       int connection = ::accept(listener, nullptr, nullptr);
-      if (connection >= 0) {
-        const auto retained = handle_connection(connection, client, session, pty, child, terminal,
-                                                parser, *frame, client_output, running) &&
-                              connection == client;
-        if (!retained) {
-          close_descriptor(connection);
-        } else {
-          frame_pending = false;
-          client_output.reset();
-        }
+      if (connection >= 0 && !handle_connection(connection, workspaces)) {
+        close_descriptor(connection);
       }
     }
 
-    if ((pty_events.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
-      const auto drained = drain_pty(pty, terminal);
-      running = drained.alive;
-      if (drained.changed && client >= 0 && !frame_pending) {
-        frame_pending = true;
-        frame_deadline = drained.alive ? std::chrono::steady_clock::now() + frame_delay
-                                       : std::chrono::steady_clock::now();
-      }
-    }
-
-    if (client >= 0 && (client_events.revents & POLLOUT) != 0 &&
-        !flush_frame(client, *frame, client_output)) {
-      close_descriptor(client);
-      parser.reset();
-      client_output.reset();
-      frame_pending = false;
-    }
-
-    if (client >= 0 && (client_events.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
-      const auto parse_result = parser.receive(client, pty, terminal);
-      if (parse_result != ParseResult::keep) {
-        close_descriptor(client);
-        parser.reset();
-        client_output.reset();
-        frame_pending = false;
-      }
-    }
-
-    if (frame_pending && client >= 0 && !client_output.busy() &&
-        std::chrono::steady_clock::now() >= frame_deadline) {
-      if (!queue_frame(client, terminal, *frame, client_output)) {
-        close_descriptor(client);
-        parser.reset();
-        client_output.reset();
-      }
-      frame_pending = false;
-    }
+    reclaim_inactive_workspaces(workspaces);
   }
-
-  close_descriptor(client);
-  static_cast<void>(::kill(child, SIGHUP));
-  close_descriptor(pty);
-  endpoint_release.release();
-  static_cast<void>(::waitpid(child, nullptr, 0));
-  return 0;
 }
 
 } // namespace
 
-[[nodiscard]] auto run_session(const int listener, const std::string_view session,
-                               const EndpointRelease release_endpoint,
-                               void* const release_context) noexcept -> int {
-  return run_session_impl(listener, session, release_endpoint, release_context);
+[[nodiscard]] auto run_server(const int listener, const EndpointRelease release_endpoint,
+                              void* const release_context) noexcept -> int {
+  return run_server_impl(listener, release_endpoint, release_context);
 }
 
 } // namespace fiber::core

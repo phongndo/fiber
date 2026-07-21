@@ -2,12 +2,13 @@
 
 Home of Fiber's authoritative mux engine and dense state.
 
-The current engine owns one pane runtime: child process, PTY, terminal adapter, attached client,
-input decoding, damage scheduling, frame deadlines, and bounded reactor work. It borrows the daemon's
-listener but does not own socket paths, locks, daemonization, or terminal-client raw mode.
+The current engine owns up to 64 named workspaces in one reactor. Each workspace currently has one
+child process, PTY, terminal adapter, attached client, input decoder, damage schedule, and frame
+deadline. The engine borrows the daemon's listener but does not own socket paths, locks,
+daemonization, or terminal-client raw mode.
 
-As windows and multiple panes are introduced, this component will also own sessions, windows,
-layouts, focus, generational IDs, typed commands/events, bounded work queues, and backpressure
+As tasks, runs, views, and multiple surfaces are introduced, this component will also own their
+generational stores, layouts, focus, typed commands/events, bounded work queues, and backpressure
 policy. Keep those entities dense and data-oriented rather than creating independently allocated
 service objects.
 

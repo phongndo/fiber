@@ -117,7 +117,7 @@ target_link_libraries(
     zstd::libzstd_static
 )
 
-add_library(fiber_daemon STATIC src/daemon/session.cpp)
+add_library(fiber_daemon STATIC src/daemon/server.cpp)
 fiber_internal_target(fiber_daemon)
 target_link_libraries(
   fiber_daemon

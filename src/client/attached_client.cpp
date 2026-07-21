@@ -1,6 +1,6 @@
 #include "client/attached_client.hpp"
 
-#include "daemon/session.hpp"
+#include "daemon/server.hpp"
 #include "platform/io.hpp"
 #include "platform/terminal_mode.hpp"
 #include "protocol/single_pane.hpp"
@@ -19,8 +19,9 @@
 namespace fiber::client {
 namespace {
 
-constexpr auto response_attached = protocol::wire_byte(protocol::AttachResponse::attached);
-constexpr auto response_busy = protocol::wire_byte(protocol::AttachResponse::busy);
+constexpr auto response_ready = protocol::wire_byte(protocol::ControlResponse::ready);
+constexpr auto response_busy = protocol::wire_byte(protocol::ControlResponse::busy);
+constexpr auto response_missing = protocol::wire_byte(protocol::ControlResponse::missing);
 using platform::close_descriptor;
 using platform::read_exact;
 using platform::send_all;
@@ -49,37 +50,46 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
   return send_all(connection, header) && send_all(connection, input);
 }
 
-[[nodiscard]] auto send_attach_handshake(const int connection,
+[[nodiscard]] auto send_attach_handshake(const int connection, const std::string_view workspace,
                                          const platform::WindowSize& size) noexcept -> bool {
-  return send_all(connection, protocol::encode_attach({
-                                  .columns = size.columns,
-                                  .rows = size.rows,
-                              }));
+  const auto header =
+      protocol::encode_workspace_header(protocol::ControlCommand::attach, workspace);
+  const auto dimensions = protocol::encode_dimensions({
+      .columns = size.columns,
+      .rows = size.rows,
+  });
+  return send_all(connection, header) &&
+         send_all(connection, std::as_bytes(std::span(workspace.data(), workspace.size()))) &&
+         send_all(connection, dimensions);
 }
 
 // This is the client reactor; branches correspond directly to terminal and socket readiness.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-[[nodiscard]] auto attach_client(const std::string_view session) -> int {
+[[nodiscard]] auto attach_client(const std::string_view workspace) -> int {
   if (::isatty(STDIN_FILENO) == 0 || ::isatty(STDOUT_FILENO) == 0) {
     static_cast<void>(write_text(STDERR_FILENO, "fiber attach requires a terminal\n"));
     return 1;
   }
 
-  int connection = daemon::open_session_connection(session);
+  int connection = daemon::open_server_connection();
   if (connection < 0) {
-    static_cast<void>(write_text(STDERR_FILENO, "no fiber pane; run `fiber new`\n"));
+    static_cast<void>(write_text(STDERR_FILENO, "no fiber daemon; run `fiber new`\n"));
     return 1;
   }
-  if (!send_attach_handshake(connection, terminal_size())) {
+  if (!send_attach_handshake(connection, workspace, terminal_size())) {
     close_descriptor(connection);
     return 1;
   }
 
   std::array<std::byte, 1> response{};
-  if (!read_exact(connection, response) || response.front() != response_attached) {
-    static_cast<void>(write_text(STDERR_FILENO, response.front() == response_busy
-                                                    ? "fiber pane is already attached\n"
-                                                    : "fiber attach failed\n"));
+  if (!read_exact(connection, response) || response.front() != response_ready) {
+    std::string_view message = "fiber attach failed\n";
+    if (response.front() == response_busy) {
+      message = "fiber workspace is already attached\n";
+    } else if (response.front() == response_missing) {
+      message = "no fiber workspace\n";
+    }
+    static_cast<void>(write_text(STDERR_FILENO, message));
     close_descriptor(connection);
     return 1;
   }
@@ -163,8 +173,8 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
 
 } // namespace
 
-[[nodiscard]] auto attach(const std::string_view session) -> int {
-  return daemon::validate_session(session) ? attach_client(session) : 1;
+[[nodiscard]] auto attach(const std::string_view workspace) -> int {
+  return daemon::validate_workspace(workspace) ? attach_client(workspace) : 1;
 }
 
 } // namespace fiber::client

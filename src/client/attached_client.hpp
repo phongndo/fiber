@@ -5,7 +5,7 @@
 
 namespace fiber::client {
 
-[[nodiscard]] auto attach(std::string_view session) -> int;
+[[nodiscard]] auto attach(std::string_view workspace) -> int;
 
 } // namespace fiber::client
 

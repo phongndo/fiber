@@ -4,8 +4,9 @@ A bounded, data-oriented C++23 foundation for a fast terminal multiplexer, backe
 pinned `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstandard supports
 bounded snapshots and application-owned compressed state.
 
-The current vertical slice provides named persistent sessions, each with one PTY pane and start,
-attach, detach, list, and kill commands, plus release-enabled invariant assertions, generational
+The current vertical slice provides up to 64 named persistent workspaces in one per-user daemon,
+each with one PTY terminal and start, attach, detach, list, and kill commands, plus release-enabled
+invariant assertions, generational
 IDs, bounded byte queues,
 and an isolated Ghostty terminal adapter. The adapter owns the canonical terminal and dirty render
 state, captures terminal effects into bounded queues, and enforces a quota-tracked allocator. See
@@ -80,18 +81,19 @@ and multi-pane build-out plan.
 ## Single-pane mux
 
 ```sh
-./build/debug/fiber new work       # start session "work" and attach
+./build/debug/fiber new work       # start workspace "work" and attach
 # Press C-b d to detach.
-./build/debug/fiber new logs       # create another independent session
-./build/debug/fiber list           # list all sessions
+./build/debug/fiber new logs       # create another workspace in the same daemon
+./build/debug/fiber list           # list all workspaces
 ./build/debug/fiber attach work    # reattach to work
-./build/debug/fiber kill work      # stop one session
-./build/debug/fiber kill-all       # stop every session
+./build/debug/fiber kill work      # stop one workspace
+./build/debug/fiber kill-all       # stop every workspace
 ```
 
-Each session currently owns one pane and permits one attached client. It starts the account's login
-shell, preserves the launch environment, advertises `xterm-256color`, and forwards terminal resizing
-to the PTY. Session names contain 1-32 ASCII letters, digits, underscores, or hyphens. `C-b C-b`
+Each workspace currently owns one terminal and permits one attached client. It starts the account's
+login shell, inherits the daemon's launch environment, advertises `xterm-256color`, and forwards terminal
+resizing to the PTY. Workspace names contain 1-32 ASCII letters, digits, underscores, or hyphens.
+`C-b C-b`
 sends a literal `C-b`. Launch `fiber` directly from the normal shell rather
 than through `nix develop` when testing personal shell configuration.
 

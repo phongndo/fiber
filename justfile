@@ -78,7 +78,7 @@ lsp-check: configure
         ! -path 'src/client/attached_client.cpp' \
         ! -path 'src/core/engine.cpp' \
         ! -path 'src/core/input.cpp' \
-        ! -path 'src/daemon/session.cpp' \
+        ! -path 'src/daemon/server.cpp' \
         ! -path 'src/platform/io.cpp' \
         ! -path 'src/protocol/single_pane.cpp' \
         ! -path 'src/render/single_pane.cpp' -print0 | sort -z | \

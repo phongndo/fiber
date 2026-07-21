@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -62,6 +63,19 @@ TEST(ProtocolTest, DecodesResizeAndDetachPackets) {
   const auto decoded_detach = decoder.next();
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(decoded_detach.value().value().kind, ClientMessageKind::detach);
+}
+
+TEST(ProtocolTest, EncodesNamedAttachControlFields) {
+  constexpr std::string_view workspace = "project";
+
+  const auto header = encode_workspace_header(ControlCommand::attach, workspace);
+  const auto dimensions = encode_dimensions({.columns = 132, .rows = 43});
+
+  EXPECT_EQ(header.front(), wire_byte(ControlCommand::attach));
+  EXPECT_EQ(decode_workspace_name_size(header.back()), workspace.size());
+  const auto decoded_dimensions = decode_dimensions(dimensions);
+  EXPECT_EQ(decoded_dimensions.columns, 132);
+  EXPECT_EQ(decoded_dimensions.rows, 43);
 }
 
 TEST(ProtocolTest, RejectsUnknownPacketType) {

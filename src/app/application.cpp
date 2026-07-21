@@ -1,7 +1,7 @@
 #include "app/application.hpp"
 
 #include "client/attached_client.hpp"
-#include "daemon/session.hpp"
+#include "daemon/server.hpp"
 #include "fiber/terminal/terminal.hpp"
 
 #include <array>
@@ -101,34 +101,35 @@ template <typename Integer>
 
 [[nodiscard]] auto print_usage() noexcept -> int {
   return write_fragment(
-             stdout, "fiber\n\nCommands:\n  new [name]     start and attach\n  start [name]   "
-                     "start detached\n  attach [name]  attach\n  list [name]    list all or one\n  "
-                     "kill [name]    stop one session\n  kill-all       stop every session\n  demo "
-                     "          "
-                     "VT demo\n\nThe default name is `default`. Detach with C-b d.\n")
+             stdout,
+             "fiber\n\nCommands:\n  new [name]     start and attach\n  start [name]   "
+             "start detached\n  attach [name]  attach\n  list [name]    list all or one\n  "
+             "kill [name]    stop one workspace\n  kill-all       stop every workspace\n  demo "
+             "          "
+             "VT demo\n\nThe default name is `default`. Detach with C-b d.\n")
              ? 0
              : 1;
 }
 
-[[nodiscard]] auto dispatch(const std::string_view command, const std::string_view session,
+[[nodiscard]] auto dispatch(const std::string_view command, const std::string_view workspace,
                             const bool named) -> int {
   if (command == "demo" && !named) {
     return run_demo();
   }
   if (command == "new") {
-    return daemon::ensure(session) == 0 ? client::attach(session) : 1;
+    return daemon::ensure(workspace) == 0 ? client::attach(workspace) : 1;
   }
   if (command == "start") {
-    return daemon::start(session);
+    return daemon::start(workspace);
   }
   if (command == "attach") {
-    return client::attach(session);
+    return client::attach(workspace);
   }
   if (command == "list" || command == "ls" || command == "lookup") {
-    return named ? daemon::list(session) : daemon::list();
+    return named ? daemon::list(workspace) : daemon::list();
   }
   if (command == "kill") {
-    return daemon::kill(session);
+    return daemon::kill(workspace);
   }
   if (command == "kill-all" && !named) {
     return daemon::kill_all();
@@ -145,12 +146,12 @@ template <typename Integer>
   }
 
   const std::string_view command(arguments.subspan(1, 1).front());
-  std::string_view session = daemon::default_session;
+  std::string_view workspace = daemon::default_workspace;
   const bool named = arguments.size() == 3;
   if (named) {
-    session = arguments.subspan(2, 1).front();
+    workspace = arguments.subspan(2, 1).front();
   }
-  return dispatch(command, session, named);
+  return dispatch(command, workspace, named);
 }
 
 } // namespace fiber::app

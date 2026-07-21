@@ -1,6 +1,7 @@
 #include "platform/pty.hpp"
 
 #include <array>
+#include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <string_view>
@@ -24,6 +25,12 @@ namespace fiber::platform {
   const auto child = ::forkpty(&pty_descriptor, nullptr, nullptr, &initial_size);
   if (child != 0) {
     return child;
+  }
+
+  // The daemon ignores these signals for its own I/O and child-reaping behavior. Ignored
+  // dispositions survive exec, so restore normal shell semantics before launching the login shell.
+  if (::signal(SIGCHLD, SIG_DFL) == SIG_ERR || ::signal(SIGPIPE, SIG_DFL) == SIG_ERR) {
+    ::_exit(127);
   }
 
   std::array fallback_shell{'/', 'b', 'i', 'n', '/', 's', 'h', '\0'};

@@ -34,8 +34,20 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
 
 } // namespace
 
-[[nodiscard]] auto encode_attach(const Dimensions dimensions) noexcept -> std::array<std::byte, 5> {
-  return encode_dimensions_packet(wire_byte(ControlCommand::attach), dimensions);
+[[nodiscard]] auto encode_workspace_header(const ControlCommand command,
+                                           const std::string_view workspace) noexcept
+    -> std::array<std::byte, 2> {
+  FIBER_ASSERT(!workspace.empty());
+  FIBER_ASSERT(workspace.size() <= workspace_name_bytes_max);
+  return {wire_byte(command), static_cast<std::byte>(workspace.size())};
+}
+
+[[nodiscard]] auto encode_dimensions(const Dimensions dimensions) noexcept
+    -> std::array<std::byte, 4> {
+  std::array<std::byte, 4> packet{};
+  encode_u16(dimensions.columns, std::span(packet).subspan<0, 2>());
+  encode_u16(dimensions.rows, std::span(packet).subspan<2, 2>());
+  return packet;
 }
 
 [[nodiscard]] auto encode_resize(const Dimensions dimensions) noexcept -> std::array<std::byte, 5> {
