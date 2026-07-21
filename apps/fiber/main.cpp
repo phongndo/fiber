@@ -1,5 +1,3 @@
 #include "app/application.hpp"
 
-int main(const int argument_count, char** argument_values) {
-  return fiber::app::run(argument_count, argument_values);
-}
+int main(const int argc, char** argv) { return fiber::app::run(argc, argv); }
