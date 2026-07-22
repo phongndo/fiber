@@ -51,14 +51,12 @@ struct StatusLabel final {
 
 [[nodiscard]] auto sanitized_title(const std::string_view title,
                                    const std::span<char> output) noexcept -> std::size_t {
-  std::size_t used = 0;
-  for (const char character : title) {
-    if (used >= output.size()) {
-      break;
-    }
+  const auto used = std::min(title.size(), output.size());
+  std::size_t index = 0;
+  for (const char character : std::span(title).first(used)) {
     const auto value = static_cast<unsigned char>(character);
-    output.subspan(used, 1).front() = value >= 0x20U && value < 0x7FU ? character : '?';
-    ++used;
+    output.subspan(index, 1).front() = value >= 0x20U && value < 0x7FU ? character : '?';
+    ++index;
   }
   if (used == 0) {
     constexpr std::string_view fallback = "shell";
