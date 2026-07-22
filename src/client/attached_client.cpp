@@ -1,14 +1,18 @@
 #include "client/attached_client.hpp"
 
 #include "daemon/server.hpp"
+#include "fiber/assert.hpp"
 #include "platform/io.hpp"
 #include "platform/terminal_mode.hpp"
 #include "protocol/single_pane.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string_view>
 
@@ -22,6 +26,7 @@ namespace {
 constexpr auto response_ready = protocol::wire_byte(protocol::ControlResponse::ready);
 constexpr auto response_busy = protocol::wire_byte(protocol::ControlResponse::busy);
 constexpr auto response_missing = protocol::wire_byte(protocol::ControlResponse::missing);
+constexpr auto prefix_flush_delay = std::chrono::milliseconds(50);
 using platform::close_descriptor;
 using platform::read_exact;
 using platform::send_all;
@@ -48,6 +53,23 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
     -> bool {
   const auto header = protocol::encode_input_header(input.size());
   return send_all(connection, header) && send_all(connection, input);
+}
+
+[[nodiscard]] auto send_prefixed_input(const int connection, const protocol::PrefixResult& parsed,
+                                       const std::span<const std::byte> input) noexcept -> bool {
+  std::size_t sent = 0;
+  for (const auto& action : std::span(parsed.actions).first(parsed.action_count)) {
+    FIBER_ASSERT(action.input_bytes >= sent);
+    FIBER_ASSERT(action.input_bytes <= input.size());
+    const auto ordinary_input = input.subspan(sent, action.input_bytes - sent);
+    if ((!ordinary_input.empty() && !send_input(connection, ordinary_input)) ||
+        !send_all(connection, protocol::encode_pane_command(action.command))) {
+      return false;
+    }
+    sent = action.input_bytes;
+  }
+  const auto remaining = input.subspan(sent);
+  return remaining.empty() || send_input(connection, remaining);
 }
 
 [[nodiscard]] auto send_attach_handshake(const int connection, const std::string_view workspace,
@@ -112,6 +134,7 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
   std::array<std::byte, protocol::input_bytes_max> input{};
   std::array<std::byte, protocol::input_bytes_max * 2U> encoded_input{};
   std::array<std::byte, std::size_t{64} * 1'024U> output{};
+  auto prefix_deadline = std::chrono::steady_clock::time_point{};
   bool attached = true;
   while (attached) {
     if (resize_pending != 0) {
@@ -121,11 +144,26 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
       }
     }
 
+    int poll_timeout = -1;
+    if (prefix_parser.has_pending_escape_sequence()) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= prefix_deadline) {
+        const auto flushed = prefix_parser.flush_pending(encoded_input);
+        if (flushed != 0 && !send_input(connection, std::span(encoded_input).first(flushed))) {
+          break;
+        }
+      } else {
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(prefix_deadline - now);
+        poll_timeout = static_cast<int>(std::max(remaining.count(), std::int64_t{1}));
+      }
+    }
+
     std::array<pollfd, 2> descriptors{{
         {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
         {.fd = connection, .events = POLLIN, .revents = 0},
     }};
-    const auto poll_result = ::poll(descriptors.data(), descriptors.size(), -1);
+    const auto poll_result = ::poll(descriptors.data(), descriptors.size(), poll_timeout);
     if (poll_result < 0) {
       if (errno == EINTR) {
         continue;
@@ -150,9 +188,11 @@ void on_window_changed([[maybe_unused]] const int signal_number) noexcept { resi
       }
       const auto parsed = prefix_parser.parse(
           std::span(input).first(static_cast<std::size_t>(bytes_read)), encoded_input);
-      if (parsed.bytes > 0 &&
-          !send_input(connection, std::span(encoded_input).first(parsed.bytes))) {
+      if (!send_prefixed_input(connection, parsed, std::span(encoded_input).first(parsed.bytes))) {
         break;
+      }
+      if (prefix_parser.has_pending_escape_sequence()) {
+        prefix_deadline = std::chrono::steady_clock::now() + prefix_flush_delay;
       }
       if (parsed.detach) {
         static_cast<void>(send_all(connection, protocol::encode_detach()));

@@ -90,7 +90,11 @@ add_library(fiber_protocol STATIC src/protocol/single_pane.cpp)
 fiber_internal_target(fiber_protocol)
 target_link_libraries(fiber_protocol PRIVATE fiber_base)
 
-add_library(fiber_render STATIC src/render/single_pane.cpp)
+add_library(
+  fiber_render STATIC
+  src/render/pane_composition.cpp
+  src/render/single_pane.cpp
+)
 fiber_internal_target(fiber_render)
 target_link_libraries(fiber_render PRIVATE fiber_base fiber_platform fiber_terminal)
 
@@ -166,11 +170,12 @@ if(FIBER_BUILD_TESTS)
     tests/core_test.cpp
     tests/fiber_test.cpp
     tests/protocol_test.cpp
+    tests/render_composition_test.cpp
     tests/terminal_test.cpp
   )
   target_link_libraries(
     fiber_tests
-    PRIVATE fiber::lib fiber_protocol fiber_warnings GTest::gtest_main GTest::gmock
+    PRIVATE fiber::lib fiber_protocol fiber_render fiber_warnings GTest::gtest_main GTest::gmock
   )
   gtest_discover_tests(fiber_tests)
 endif()

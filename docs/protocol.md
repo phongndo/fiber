@@ -2,10 +2,12 @@
 
 ## Status and scope
 
-The current protocol is the bounded local wire format used by the single-pane runtime. Its
-implementation is isolated in `src/protocol/single_pane.*` so framing can be tested independently of
-sockets and terminal state. It is not yet the final multi-pane protocol and currently has no version
+The current protocol is the bounded local wire format used by the runtime. Its implementation
+remains in `src/protocol/single_pane.*` for now so framing can be tested independently of sockets and
+terminal state. It is not yet the final generalized protocol and currently has no version
 negotiation; incompatible changes must therefore remain coordinated between the daemon and client.
+This pane-command revision uses the `fiber-v5-<uid>.sock` endpoint so it cannot attach to an older
+single-pane daemon.
 
 All integers are unsigned big-endian. Message type values are one ASCII byte for diagnostics only;
 they must be treated as binary enum values, not text.
@@ -67,6 +69,19 @@ terminal adapter rather than blindly forwarding recognized control/navigation se
 The runtime clamps dimensions to its configured hard limits, resizes the PTY, and then resizes the
 canonical terminal state. Both operations must succeed.
 
+### Pane command
+
+```text
++--------+--------------------+
+| 'P'    | pane command: u8   |
++--------+--------------------+
+   1 B           1 B
+```
+
+The command byte is a closed enum for left/right and top/bottom splits, directional/next/previous
+focus, close, and zoom. Unknown values terminate the attached connection as protocol errors. The
+core applies commands only to the attached workspace and its focused pane.
+
 ### Detach
 
 ```text
@@ -98,14 +113,22 @@ connection. They never partially mutate mux state.
 
 ## Prefix parser
 
-The attached client currently recognizes a fixed `C-b` prefix:
+The attached client currently recognizes a fixed tmux-compatible `C-b` prefix:
 
+- `C-b %` and `C-b "` emit left/right and top/bottom split commands;
+- `C-b Arrow`, `C-b o`, and `C-b ;` emit focus commands;
+- `C-b x` and `C-b z` emit close and zoom commands;
 - `C-b d` emits a detach message;
 - `C-b C-b` emits one literal `C-b` input byte;
-- `C-b x` forwards literal `C-b` followed by `x` for any other byte `x`.
+- unknown keys forward the literal prefix and key.
 
-The eventual key-table system will replace this fixed policy. The parser remains bounded and outside
-terminal VT parsing.
+Incomplete prefix sequences remain pending for at most 50 ms. If the sequence is still incomplete,
+the client forwards every buffered byte literally so a lone prefix or `C-b Escape` cannot be
+swallowed indefinitely.
+
+Command actions retain their offsets among ordinary input so packet emission preserves input order.
+The parser handles fragmented arrow-key escape sequences, remains bounded, and stays outside
+terminal VT parsing. The eventual configurable key-table system will replace this fixed policy.
 
 ## Evolution requirements
 

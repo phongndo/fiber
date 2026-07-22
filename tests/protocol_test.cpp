@@ -65,6 +65,22 @@ TEST(ProtocolTest, DecodesResizeAndDetachPackets) {
   EXPECT_EQ(decoded_detach.value().value().kind, ClientMessageKind::detach);
 }
 
+TEST(ProtocolTest, EncodesAndDecodesPaneCommands) {
+  ClientDecoder decoder;
+  const auto packet = encode_pane_command(PaneCommand::split_left_right);
+  std::ranges::copy(packet, decoder.writable_bytes().begin());
+  ASSERT_TRUE(decoder.commit(packet.size()).has_value());
+
+  const auto decoded = decoder.next();
+
+  ASSERT_TRUE(decoded.has_value());
+  ASSERT_TRUE(decoded->has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const auto& message = decoded.value().value();
+  EXPECT_EQ(message.kind, ClientMessageKind::pane_command);
+  EXPECT_EQ(message.pane_command, PaneCommand::split_left_right);
+}
+
 TEST(ProtocolTest, EncodesNamedAttachControlFields) {
   constexpr std::string_view workspace = "project";
 
@@ -111,6 +127,18 @@ TEST(ProtocolTest, PrefixParserDetachesWithoutForwardingCommand) {
   EXPECT_EQ(output.front(), std::byte{'x'});
 }
 
+TEST(ProtocolTest, PrefixParserKeepsBarePrefixPendingWithoutEscapeTimeout) {
+  PrefixParser parser;
+  const std::array input{std::byte{0x02}};
+  std::array<std::byte, 2> output{};
+
+  const auto result = parser.parse(input, output);
+
+  EXPECT_EQ(result.bytes, 0U);
+  EXPECT_TRUE(parser.has_pending_input());
+  EXPECT_FALSE(parser.has_pending_escape_sequence());
+}
+
 TEST(ProtocolTest, PrefixParserForwardsLiteralPrefix) {
   PrefixParser parser;
   const std::array input{std::byte{0x02}, std::byte{0x02}};
@@ -121,6 +149,62 @@ TEST(ProtocolTest, PrefixParserForwardsLiteralPrefix) {
   EXPECT_FALSE(result.detach);
   ASSERT_EQ(result.bytes, 1);
   EXPECT_EQ(output.front(), std::byte{0x02});
+}
+
+TEST(ProtocolTest, PrefixParserCapturesTmuxSplitsInInputOrder) {
+  PrefixParser parser;
+  const std::array input{std::byte{'a'},  std::byte{0x02}, std::byte{'%'}, std::byte{'b'},
+                         std::byte{0x02}, std::byte{'"'},  std::byte{'c'}};
+  std::array<std::byte, input.size() * 2U> output{};
+
+  const auto result = parser.parse(input, output);
+
+  EXPECT_FALSE(result.detach);
+  ASSERT_EQ(result.bytes, 3U);
+  const auto output_bytes = std::span(output);
+  EXPECT_EQ(output.front(), std::byte{'a'});
+  EXPECT_EQ(output_bytes.subspan(1, 1).front(), std::byte{'b'});
+  EXPECT_EQ(output_bytes.subspan(2, 1).front(), std::byte{'c'});
+  ASSERT_EQ(result.action_count, 2U);
+  EXPECT_EQ(result.actions.front().input_bytes, 1U);
+  EXPECT_EQ(result.actions.front().command, PaneCommand::split_left_right);
+  const auto& second_action = std::span(result.actions).subspan<1, 1>().front();
+  EXPECT_EQ(second_action.input_bytes, 2U);
+  EXPECT_EQ(second_action.command, PaneCommand::split_top_bottom);
+}
+
+TEST(ProtocolTest, PrefixParserCapturesFragmentedArrowKey) {
+  PrefixParser parser;
+  std::array<std::byte, 8> output{};
+  const std::array prefix_and_escape{std::byte{0x02}, std::byte{0x1B}};
+  const std::array csi{std::byte{'['}};
+  const std::array direction{std::byte{'D'}};
+
+  EXPECT_EQ(parser.parse(prefix_and_escape, output).action_count, 0U);
+  EXPECT_TRUE(parser.has_pending_input());
+  EXPECT_TRUE(parser.has_pending_escape_sequence());
+  EXPECT_EQ(parser.parse(csi, output).action_count, 0U);
+  const auto result = parser.parse(direction, output);
+
+  EXPECT_EQ(result.bytes, 0U);
+  ASSERT_EQ(result.action_count, 1U);
+  EXPECT_EQ(result.actions.front().command, PaneCommand::focus_left);
+  EXPECT_FALSE(parser.has_pending_input());
+}
+
+TEST(ProtocolTest, PrefixParserFlushesInterruptedPrefixEscape) {
+  PrefixParser parser;
+  std::array<std::byte, 8> output{};
+  const std::array input{std::byte{0x02}, std::byte{0x1B}};
+
+  const auto parsed = parser.parse(input, output);
+
+  EXPECT_EQ(parsed.bytes, 0U);
+  ASSERT_TRUE(parser.has_pending_input());
+  ASSERT_EQ(parser.flush_pending(output), 2U);
+  EXPECT_EQ(output.front(), std::byte{0x02});
+  EXPECT_EQ(std::span(output).subspan(1, 1).front(), std::byte{0x1B});
+  EXPECT_FALSE(parser.has_pending_input());
 }
 
 } // namespace

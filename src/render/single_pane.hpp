@@ -2,6 +2,7 @@
 #define FIBER_RENDER_SINGLE_PANE_HPP
 
 #include "fiber/terminal/terminal.hpp"
+#include "render/pane_composition.hpp"
 
 #include <array>
 #include <cstddef>
@@ -30,6 +31,14 @@ struct ClientOutputState final {
                                ClientOutputState& output) noexcept -> bool;
 [[nodiscard]] auto queue_frame(int client, vt::Terminal& terminal, FrameBuffer& frame,
                                ClientOutputState& output) noexcept -> bool;
+
+[[nodiscard]] auto send_composed_frame(int client, std::span<const PaneSurface> panes,
+                                       Viewport viewport, FrameBuffer& frame,
+                                       bool force_full) noexcept -> bool;
+[[nodiscard]] auto queue_composed_frame(int client, std::span<const PaneSurface> panes,
+                                        Viewport viewport, FrameBuffer& frame,
+                                        ClientOutputState& output, bool force_full) noexcept
+    -> bool;
 
 } // namespace fiber::render
 

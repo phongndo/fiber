@@ -49,7 +49,7 @@ using platform::write_text;
 }
 
 [[nodiscard]] auto socket_path() -> std::string {
-  return "/tmp/fiber-v2-" + std::to_string(::getuid()) + ".sock";
+  return "/tmp/fiber-v5-" + std::to_string(::getuid()) + ".sock";
 }
 
 [[nodiscard]] auto socket_address(const std::string& path) noexcept

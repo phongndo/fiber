@@ -1,5 +1,6 @@
 #include "fiber/fiber.hpp"
 #include "fiber/terminal/terminal.hpp"
+#include "render/pane_composition.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -175,35 +176,64 @@ void benchmark_terminal_ansi_scroll_operations(benchmark::State& state) {
 
 void benchmark_terminal_multiple_panes(benchmark::State& state) {
   const auto pane_count = static_cast<std::size_t>(state.range(0));
+  std::size_t grid_columns = 4;
+  if (pane_count == 1) {
+    grid_columns = 1;
+  } else if (pane_count == 4) {
+    grid_columns = 2;
+  }
+  const auto grid_rows = pane_count / grid_columns;
+  constexpr std::uint16_t pane_columns = 20;
+  constexpr std::uint16_t pane_rows = 6;
   std::vector<vt::Terminal> terminals;
   terminals.reserve(pane_count);
+  vt::TerminalOptions options;
+  options.size = {.columns = pane_columns, .rows = pane_rows};
   for (std::size_t pane = 0; pane < pane_count; ++pane) {
-    auto result = vt::Terminal::create({});
+    auto result = vt::Terminal::create(options);
     if (!result.has_value()) {
       state.SkipWithError("failed to create terminal");
       return;
     }
     terminals.emplace_back(std::move(*result));
   }
+
+  std::vector<render::PaneSurface> panes;
+  panes.reserve(pane_count);
+  for (std::size_t pane = 0; pane < pane_count; ++pane) {
+    panes.push_back({
+        .terminal = &std::span(terminals).subspan(pane, 1).front(),
+        .rectangle =
+            {
+                .column = static_cast<std::uint16_t>((pane % grid_columns) * pane_columns),
+                .row = static_cast<std::uint16_t>((pane / grid_columns) * pane_rows),
+                .columns = pane_columns,
+                .rows = pane_rows,
+            },
+        .focused = pane == 0,
+    });
+  }
+  const render::Viewport viewport{
+      .columns = static_cast<std::uint16_t>(grid_columns * pane_columns),
+      .rows = static_cast<std::uint16_t>(grid_rows * pane_rows),
+  };
   std::array<std::byte, std::size_t{256} * 1'024U> frame{};
   constexpr std::string_view input = "sparse update";
   const auto bytes = std::as_bytes(std::span(input.data(), input.size()));
-  for (auto& terminal : terminals) {
-    if (!terminal.render_ansi(frame, true).has_value()) {
-      state.SkipWithError("failed to render initial frame");
-      return;
-    }
+  if (!render::compose_frame(panes, viewport, frame, true).has_value()) {
+    state.SkipWithError("failed to compose initial frame");
+    return;
   }
 
   for ([[maybe_unused]] const auto iteration : state) {
     for (auto& terminal : terminals) {
       terminal.write(bytes);
-      auto rendered = terminal.render_ansi(frame);
-      benchmark::DoNotOptimize(rendered);
-      if (!rendered.has_value()) {
-        state.SkipWithError("failed to render pane");
-        return;
-      }
+    }
+    auto rendered = render::compose_frame(panes, viewport, frame, false);
+    benchmark::DoNotOptimize(rendered);
+    if (!rendered.has_value()) {
+      state.SkipWithError("failed to compose panes");
+      return;
     }
   }
 }

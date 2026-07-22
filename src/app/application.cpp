@@ -106,7 +106,8 @@ template <typename Integer>
              "start detached\n  attach [name]  attach\n  list [name]    list all or one\n  "
              "kill [name]    stop one workspace\n  kill-all       stop every workspace\n  demo "
              "          "
-             "VT demo\n\nThe default name is `default`. Detach with C-b d.\n")
+             "VT demo\n\nThe default name is `default`. C-b % and C-b \" split panes; "
+             "C-b Arrow changes focus; C-b d detaches.\n")
              ? 0
              : 1;
 }

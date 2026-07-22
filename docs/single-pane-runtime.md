@@ -1,10 +1,10 @@
-# Single-pane runtime
+# Runtime vertical slice
 
 ## Status
 
-Fiber's first end-to-end vertical slice has been migrated out of the former monolithic
-`single_pane.cpp`. The behavior remains intentionally single-pane, but its ownership now follows the
-production component architecture:
+Fiber's end-to-end vertical slice has been migrated out of the former monolithic
+`single_pane.cpp`. Workspaces now support bounded split panes while retaining the production
+component architecture:
 
 ```text
 apps/fiber/main.cpp
@@ -19,7 +19,7 @@ apps/fiber/main.cpp
                    +------> renderer / platform / protocol
 ```
 
-There is no temporary demo component or `app -> demo` dependency. New multi-pane work must build on
+There is no temporary demo component or `app -> demo` dependency. Further mux work must build on
 the core, client, daemon, protocol, and render boundaries rather than recreate a vertical-slice
 monolith.
 
@@ -44,10 +44,11 @@ Workspace creation, lookup, listing, and removal are handled by the authoritativ
 
 ### Core — `src/core/`
 
-Owns up to 64 running workspaces in one reactor. Each currently contains one child process, PTY,
-`vt::Terminal`, attached daemon-side client descriptor, protocol-message state, frame scheduling,
-and backpressure state. The reactor borrows the daemon listener and remains the sole owner of
-mutable workspace and terminal state.
+Owns up to 64 running workspaces and 4,096 panes in one reactor, with a per-workspace bound of 64
+panes. Every pane owns one child process, PTY, terminal, and resolved rectangle. The workspace owns
+its split tree, focus/zoom state, attached daemon-side client descriptor, protocol-message state,
+frame scheduling, and backpressure state. The reactor borrows the daemon listener and remains the
+sole owner of mutable workspace and terminal state.
 
 ### Supporting components
 
@@ -61,13 +62,16 @@ mutable workspace and terminal state.
 The runtime currently provides:
 
 - up to 64 validated named workspaces in one per-user daemon;
-- one shell, PTY, and canonical Ghostty terminal per workspace;
+- up to 64 shells, PTYs, and canonical Ghostty terminals per workspace;
 - one attached client plus independent list/kill control connections;
-- detach with `C-b d` and literal prefix with `C-b C-b`;
-- terminal resize forwarding;
+- tmux-compatible split, focus, close, zoom, detach, and literal-prefix bindings;
+- bounded binary split trees with one-cell pane separators;
+- terminal resize propagation from resolved pane rectangles;
 - bounded protocol and PTY read batches;
 - terminal-generated PTY responses;
 - dirty-row rendering and retained physical client state;
+- bounded composition of validated pane rectangles into one synchronized outer-terminal frame;
+- focused-pane cursor and outer-terminal mode ownership in the composition layer;
 - a 2 ms frame-coalescing deadline;
 - partial nonblocking live-frame writes;
 - full visible-state reconstruction on reattach;
@@ -75,15 +79,18 @@ The runtime currently provides:
 
 ## Current limitations
 
-The architecture is migrated, but the product remains a single-pane implementation:
+The architecture is migrated and the first split-pane behavior is implemented, with these
+limitations:
 
-- workspaces have no task store, views, or split layout tree;
+- workspaces have no separate task/view stores or generational pane IDs;
 - only one client may attach at a time;
 - the local protocol has no version or capability negotiation;
 - listener acceptance and initial attach setup still use the vertical slice's simple policy;
 - new workspaces inherit the daemon's original environment and working directory;
 - extension commands/events and configurable key tables are not integrated;
-- the renderer does not yet compose multiple pane surfaces.
+- pane ratios are fixed at equal halves and cannot yet be resized interactively;
+- alternate tmux layouts, pane-number overlays, status rows, and per-client physical state are not
+  yet implemented.
 
 These are feature and runtime-hardening tasks, not reasons to reorganize the source tree again.
 
@@ -93,8 +100,8 @@ These are feature and runtime-hardening tasks, not reasons to reorganize the sou
 2. Represent topology and lifecycle changes as typed core commands.
 3. Generalize listener integration to multiple pending clients without blocking workspace progress.
 4. Replace the rebuilt poll set with the descriptor registry/reactor abstraction.
-5. Add split-tree views and per-client viewport state.
-6. Generalize rendering from one terminal surface to composed surface rectangles.
+5. Move split topology into generational view/pane stores and add per-client viewport state.
+6. Add adjustable ratios, alternate layouts, pane-number overlays, and status surfaces.
 7. Version the protocol and add capabilities, request IDs, and typed errors.
 8. Add deferred, budgeted extension commands and immutable events.
 9. Add replay traces, capacity tests, fuzzing, and end-to-end latency benchmarks.

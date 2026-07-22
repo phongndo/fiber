@@ -10,6 +10,7 @@ namespace {
 constexpr std::byte packet_input{'I'};
 constexpr std::byte packet_resize{'R'};
 constexpr std::byte packet_detach{'D'};
+constexpr std::byte packet_pane_command{'P'};
 
 void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output) noexcept {
   output.front() = static_cast<std::byte>(value >> 8U);
@@ -21,6 +22,26 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
   const auto high_value = std::to_integer<std::uint16_t>(high);
   const auto low_value = std::to_integer<std::uint16_t>(low);
   return static_cast<std::uint16_t>((high_value << 8U) | low_value);
+}
+
+[[nodiscard]] auto pane_command(const std::byte encoded) noexcept -> std::optional<PaneCommand> {
+  const auto command = static_cast<PaneCommand>(std::to_integer<std::uint8_t>(encoded));
+  switch (command) {
+  case PaneCommand::none:
+    break;
+  case PaneCommand::split_left_right:
+  case PaneCommand::split_top_bottom:
+  case PaneCommand::focus_left:
+  case PaneCommand::focus_right:
+  case PaneCommand::focus_up:
+  case PaneCommand::focus_down:
+  case PaneCommand::focus_next:
+  case PaneCommand::focus_previous:
+  case PaneCommand::close:
+  case PaneCommand::zoom:
+    return command;
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] auto encode_dimensions_packet(const std::byte type,
@@ -64,6 +85,12 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
 
 [[nodiscard]] auto encode_detach() noexcept -> std::array<std::byte, 1> { return {packet_detach}; }
 
+[[nodiscard]] auto encode_pane_command(const PaneCommand command) noexcept
+    -> std::array<std::byte, 2> {
+  FIBER_ASSERT(command != PaneCommand::none);
+  return {packet_pane_command, static_cast<std::byte>(command)};
+}
+
 [[nodiscard]] auto decode_dimensions(const std::span<const std::byte, 4> bytes) noexcept
     -> Dimensions {
   return {
@@ -72,33 +99,159 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
   };
 }
 
+// Prefix parsing is a bounded state machine because terminal escape keys may be fragmented across
+// reads. Actions retain their position among ordinary input bytes so the client preserves ordering.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 [[nodiscard]] auto PrefixParser::parse(const std::span<const std::byte> input,
                                        const std::span<std::byte> output) noexcept -> PrefixResult {
   PrefixResult result{};
+  const auto append = [&](const std::byte byte) {
+    FIBER_ASSERT(result.bytes < output.size());
+    output.subspan(result.bytes, 1).front() = byte;
+    ++result.bytes;
+  };
+  const auto command = [&](const PaneCommand pane_command) {
+    if (result.action_count >= result.actions.size()) {
+      return false;
+    }
+    std::span(result.actions).subspan(result.action_count, 1).front() = {
+        .input_bytes = result.bytes,
+        .command = pane_command,
+    };
+    ++result.action_count;
+    return true;
+  };
+
   for (const auto byte : input) {
-    if (prefix_) {
-      prefix_ = false;
-      if (byte == std::byte{'d'}) {
-        result.detach = true;
+    if (state_ == State::normal) {
+      if (byte == std::byte{0x02}) {
+        state_ = State::prefix;
+      } else {
+        append(byte);
+      }
+      continue;
+    }
+    if (state_ == State::escape) {
+      if (byte == std::byte{'['} || byte == std::byte{'O'}) {
+        escape_introducer_ = byte;
+        state_ = State::csi;
+      } else {
+        append(std::byte{0x02});
+        append(std::byte{0x1B});
+        append(byte);
+        state_ = State::normal;
+      }
+      continue;
+    }
+    if (state_ == State::csi) {
+      std::optional<PaneCommand> pane_command;
+      switch (byte) {
+      case std::byte{'A'}:
+        pane_command = PaneCommand::focus_up;
+        break;
+      case std::byte{'B'}:
+        pane_command = PaneCommand::focus_down;
+        break;
+      case std::byte{'C'}:
+        pane_command = PaneCommand::focus_right;
+        break;
+      case std::byte{'D'}:
+        pane_command = PaneCommand::focus_left;
+        break;
+      default:
         break;
       }
-      if (byte == std::byte{0x02}) {
-        output.subspan(result.bytes, 1).front() = byte;
-        ++result.bytes;
-        continue;
+      if (!pane_command.has_value() || !command(*pane_command)) {
+        append(std::byte{0x02});
+        append(std::byte{0x1B});
+        append(escape_introducer_);
+        append(byte);
       }
-      output.subspan(result.bytes, 1).front() = std::byte{0x02};
-      ++result.bytes;
-    } else if (byte == std::byte{0x02}) {
-      prefix_ = true;
+      state_ = State::normal;
       continue;
     }
 
-    output.subspan(result.bytes, 1).front() = byte;
-    ++result.bytes;
+    FIBER_ASSERT(state_ == State::prefix);
+    state_ = State::normal;
+    if (byte == std::byte{'d'}) {
+      result.detach = true;
+      break;
+    }
+    if (byte == std::byte{0x02}) {
+      append(byte);
+      continue;
+    }
+    if (byte == std::byte{0x1B}) {
+      state_ = State::escape;
+      continue;
+    }
+
+    std::optional<PaneCommand> pane_command;
+    switch (byte) {
+    case std::byte{'%'}:
+      pane_command = PaneCommand::split_left_right;
+      break;
+    case std::byte{'"'}:
+      pane_command = PaneCommand::split_top_bottom;
+      break;
+    case std::byte{'o'}:
+      pane_command = PaneCommand::focus_next;
+      break;
+    case std::byte{';'}:
+      pane_command = PaneCommand::focus_previous;
+      break;
+    case std::byte{'x'}:
+      pane_command = PaneCommand::close;
+      break;
+    case std::byte{'z'}:
+      pane_command = PaneCommand::zoom;
+      break;
+    default:
+      break;
+    }
+    if (!pane_command.has_value() || !command(*pane_command)) {
+      append(std::byte{0x02});
+      append(byte);
+    }
   }
-  FIBER_ASSERT(result.bytes <= output.size());
   return result;
+}
+
+[[nodiscard]] auto PrefixParser::has_pending_input() const noexcept -> bool {
+  return state_ != State::normal;
+}
+
+[[nodiscard]] auto PrefixParser::has_pending_escape_sequence() const noexcept -> bool {
+  return state_ == State::escape || state_ == State::csi;
+}
+
+[[nodiscard]] auto PrefixParser::flush_pending(const std::span<std::byte> output) noexcept
+    -> std::size_t {
+  std::size_t bytes = 0;
+  const auto append = [&](const std::byte byte) {
+    FIBER_ASSERT(bytes < output.size());
+    output.subspan(bytes, 1).front() = byte;
+    ++bytes;
+  };
+
+  switch (state_) {
+  case State::normal:
+    break;
+  case State::prefix:
+    append(std::byte{0x02});
+    break;
+  case State::escape:
+    append(std::byte{0x02});
+    append(std::byte{0x1B});
+    break;
+  case State::csi:
+    append(std::byte{0x02});
+    append(std::byte{0x1B});
+    append(escape_introducer_);
+    break;
+  }
+  state_ = State::normal;
+  return bytes;
 }
 
 [[nodiscard]] auto ClientDecoder::writable_bytes() noexcept -> std::span<std::byte> {
@@ -139,6 +292,21 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
     return ClientMessage{
         .kind = ClientMessageKind::resize,
         .dimensions = decode_dimensions(std::span(buffered).subspan<1, 4>()),
+        .input = {},
+    };
+  }
+  if (type == packet_pane_command) {
+    if (used_ < 2) {
+      return std::optional<ClientMessage>{};
+    }
+    const auto decoded_command = pane_command(buffered.subspan<1>().front());
+    if (!decoded_command.has_value()) {
+      return std::unexpected(DecodeError::invalid_type);
+    }
+    pending_size_ = 2;
+    return ClientMessage{
+        .kind = ClientMessageKind::pane_command,
+        .pane_command = *decoded_command,
         .input = {},
     };
   }

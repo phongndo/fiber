@@ -71,6 +71,16 @@ struct AnsiRenderResult final {
   bool full{false};
 };
 
+// Placement and outer-terminal policy for one surface in a composed frame. Coordinates are
+// zero-based. The compositor, rather than the pane, owns synchronized-update framing and clearing.
+struct PaneRenderOptions final {
+  std::uint16_t column{0};
+  std::uint16_t row{0};
+  bool force_full{false};
+  bool focused{false};
+  bool allow_terminal_scroll{false};
+};
+
 enum class KeyAction : std::uint8_t {
   release,
   press,
@@ -179,9 +189,19 @@ public:
   [[nodiscard]] auto update_render_state() noexcept -> std::expected<RenderUpdate, Error>;
   [[nodiscard]] auto mark_rendered() noexcept -> std::expected<void, Error>;
 
-  // Incremental ANSI renderer for the attached terminal client.
+  // Incremental ANSI renderer for a terminal occupying the complete outer terminal.
   [[nodiscard]] auto render_ansi(std::span<std::byte> output, bool force_full = false) noexcept
       -> std::expected<AnsiRenderResult, Error>;
+
+  // Incremental pane-surface encoder. It emits absolute positions offset by options, but no
+  // synchronized-update boundary or screen clear, so a renderer can compose several panes into one
+  // atomic outer-terminal frame.
+  [[nodiscard]] auto render_pane_ansi(std::span<std::byte> output,
+                                      const PaneRenderOptions& options) noexcept
+      -> std::expected<AnsiRenderResult, Error>;
+
+  // Invalidates retained ANSI output state after a composed frame is discarded.
+  void invalidate_ansi_render_state() noexcept;
 
   // Encodes normalized input using the pane's active legacy or Kitty keyboard modes.
   [[nodiscard]] auto encode_key(const KeyEvent& event, std::span<std::byte> output) noexcept
@@ -206,6 +226,12 @@ private:
   struct Impl;
 
   explicit Terminal(std::unique_ptr<Impl> impl) noexcept;
+
+  [[nodiscard]] auto render_ansi_impl(std::span<std::byte> output, bool force_full,
+                                      std::uint16_t origin_column, std::uint16_t origin_row,
+                                      bool composed, bool focused,
+                                      bool allow_terminal_scroll) noexcept
+      -> std::expected<AnsiRenderResult, Error>;
 
   std::unique_ptr<Impl> impl_;
 };

@@ -1,0 +1,61 @@
+#ifndef FIBER_RENDER_PANE_COMPOSITION_HPP
+#define FIBER_RENDER_PANE_COMPOSITION_HPP
+
+#include "fiber/terminal/terminal.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <span>
+
+namespace fiber::render {
+
+struct Viewport final {
+  std::uint16_t columns{0};
+  std::uint16_t rows{0};
+};
+
+struct PaneRectangle final {
+  std::uint16_t column{0};
+  std::uint16_t row{0};
+  std::uint16_t columns{0};
+  std::uint16_t rows{0};
+
+  friend constexpr auto operator==(const PaneRectangle&, const PaneRectangle&) noexcept
+      -> bool = default;
+};
+
+struct PaneSurface final {
+  vt::Terminal* terminal{nullptr};
+  PaneRectangle rectangle{};
+  bool focused{false};
+  bool border_right{false};
+  bool border_bottom{false};
+};
+
+enum class CompositionError : std::uint8_t {
+  invalid_viewport,
+  too_many_panes,
+  invalid_pane,
+  multiple_focused_panes,
+  output_exhausted,
+  terminal_error,
+};
+
+struct CompositionResult final {
+  std::size_t bytes{0};
+  std::size_t panes{0};
+  std::size_t rows{0};
+  bool full{false};
+};
+
+// Composes already-resolved pane rectangles into one synchronized outer-terminal update. The
+// focused surface is encoded last so its cursor and terminal modes remain authoritative. Callers
+// must force a full frame after changing pane geometry.
+[[nodiscard]] auto compose_frame(std::span<const PaneSurface> panes, Viewport viewport,
+                                 std::span<std::byte> output, bool force_full) noexcept
+    -> std::expected<CompositionResult, CompositionError>;
+
+} // namespace fiber::render
+
+#endif // FIBER_RENDER_PANE_COMPOSITION_HPP

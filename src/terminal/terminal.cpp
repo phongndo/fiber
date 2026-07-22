@@ -695,8 +695,9 @@ struct Terminal::Impl final {
 
   // Encode the minimal prefix/suffix-differing span while refreshing bounded physical state.
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-  [[nodiscard]] auto encode_row(AnsiWriter& writer, const std::size_t row_index,
-                                const bool force) noexcept -> std::expected<bool, Error> {
+  [[nodiscard]] auto encode_row(AnsiWriter& writer, const std::size_t row_index, const bool force,
+                                const std::uint16_t origin_column, const std::uint16_t origin_row,
+                                const bool erase_line_tail) noexcept -> std::expected<bool, Error> {
     FIBER_ASSERT(row_index < row_hash_count);
     FIBER_ASSERT(physical_cell_hashes != nullptr);
     const auto checkpoint = writer.size();
@@ -776,8 +777,10 @@ struct Terminal::Impl final {
       physical_hash = cell_hash;
       if (span_started || changed) {
         if (!span_started) {
-          if (!writer.append("\x1B[") || !writer.append_integer(row_index + 1U) ||
-              !writer.append(";") || !writer.append_integer(cell_count + 1U) ||
+          if (!writer.append("\x1B[") ||
+              !writer.append_integer(static_cast<std::size_t>(origin_row) + row_index + 1U) ||
+              !writer.append(";") ||
+              !writer.append_integer(static_cast<std::size_t>(origin_column) + cell_count + 1U) ||
               !writer.append("H")) {
             return std::unexpected(Error::out_of_space);
           }
@@ -829,7 +832,8 @@ struct Terminal::Impl final {
       FIBER_ASSERT(writer.size() == checkpoint);
       return false;
     }
-    if (trailing_blank_start != std::numeric_limits<std::size_t>::max() && trailing_blank_changed) {
+    if (erase_line_tail && trailing_blank_start != std::numeric_limits<std::size_t>::max() &&
+        trailing_blank_changed) {
       writer.rewind(trailing_blank_start);
       if (!writer.append("\x1B[0m\x1B[K")) {
         return std::unexpected(Error::out_of_space);
@@ -1054,9 +1058,29 @@ auto Terminal::mark_rendered() noexcept -> std::expected<void, Error> {
   return {};
 }
 
+auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_full) noexcept
+    -> std::expected<AnsiRenderResult, Error> {
+  return render_ansi_impl(output, force_full, 0, 0, false, true, true);
+}
+
+auto Terminal::render_pane_ansi(const std::span<std::byte> output,
+                                const PaneRenderOptions& options) noexcept
+    -> std::expected<AnsiRenderResult, Error> {
+  return render_ansi_impl(output, options.force_full, options.column, options.row, true,
+                          options.focused, options.allow_terminal_scroll);
+}
+
+void Terminal::invalidate_ansi_render_state() noexcept {
+  FIBER_ASSERT(impl_ != nullptr);
+  impl_->ansi_physical_valid = false;
+}
+
 // Rendering is an explicit bounded pass over rows and cells owned by Ghostty's snapshot.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_full) noexcept
+auto Terminal::render_ansi_impl(const std::span<std::byte> output, const bool force_full,
+                                const std::uint16_t origin_column, const std::uint16_t origin_row,
+                                const bool composed, const bool focused,
+                                const bool allow_terminal_scroll) noexcept
     -> std::expected<AnsiRenderResult, Error> {
   FIBER_ASSERT(impl_ != nullptr);
   FIBER_ASSERT(impl_->render_state != nullptr);
@@ -1081,13 +1105,14 @@ auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_f
   const bool full = force_full || !impl_->ansi_physical_valid;
 
   AnsiWriter writer(output);
-  if (!writer.append("\x1B[?2026h\x1B[?25l\x1B[?7l") || (full && !writer.append("\x1B[2J\x1B[H"))) {
+  if (!composed && (!writer.append("\x1B[?2026h\x1B[?25l\x1B[?7l") ||
+                    (full && !writer.append("\x1B[2J\x1B[H")))) {
     impl_->ansi_physical_valid = false;
     return std::unexpected(Error::out_of_space);
   }
 
   std::int32_t scrolled_rows = 0;
-  if (!full && *dirty == DirtyState::full) {
+  if (allow_terminal_scroll && !full && *dirty == DirtyState::full) {
     result = ghostty_render_state_get(impl_->render_state, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
                                       static_cast<void*>(&impl_->row_iterator));
     if (result != GHOSTTY_SUCCESS) {
@@ -1140,7 +1165,8 @@ auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_f
         std::span(impl_->row_hashes).subspan(row_index, 1).front() ==
             std::span(impl_->current_row_hashes).subspan(row_index, 1).front();
     if ((full || row_dirty) && !scroll_row_unchanged) {
-      const auto encoded = impl_->encode_row(writer, row_index, full);
+      const auto encoded =
+          impl_->encode_row(writer, row_index, full, origin_column, origin_row, !composed);
       if (!encoded.has_value()) {
         impl_->ansi_physical_valid = false;
         return std::unexpected(encoded.error());
@@ -1156,19 +1182,23 @@ auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_f
     ++row_index;
   }
 
-  if (!writer.append("\x1B[0m\x1B[?7h")) {
+  if (!writer.append(composed ? "\x1B[0m" : "\x1B[0m\x1B[?7h")) {
     impl_->ansi_physical_valid = false;
     return std::unexpected(Error::out_of_space);
   }
-  if (metadata.cursor_visible && metadata.cursor_in_viewport) {
-    if (!writer.append("\x1B[") || !writer.append_integer(metadata.cursor_row + 1U) ||
-        !writer.append(";") || !writer.append_integer(metadata.cursor_column + 1U) ||
+  if ((!composed || focused) && metadata.cursor_visible && metadata.cursor_in_viewport) {
+    if (!writer.append("\x1B[") ||
+        !writer.append_integer(static_cast<std::size_t>(origin_row) + metadata.cursor_row + 1U) ||
+        !writer.append(";") ||
+        !writer.append_integer(static_cast<std::size_t>(origin_column) + metadata.cursor_column +
+                               1U) ||
         !writer.append("H\x1B[?25h")) {
       impl_->ansi_physical_valid = false;
       return std::unexpected(Error::out_of_space);
     }
   }
-  if ((!metadata.cursor_visible || !metadata.cursor_in_viewport) && !writer.append("\x1B[?25l")) {
+  if ((!composed || focused) && (!metadata.cursor_visible || !metadata.cursor_in_viewport) &&
+      !writer.append("\x1B[?25l")) {
     impl_->ansi_physical_valid = false;
     return std::unexpected(Error::out_of_space);
   }
@@ -1192,26 +1222,28 @@ auto Terminal::render_ansi(const std::span<std::byte> output, const bool force_f
       MirroredMode{.mode = GHOSTTY_MODE_BRACKETED_PASTE, .number = 2004},
   };
   static_assert(mirrored_modes.size() == 12);
-  std::size_t mode_index = 0;
-  for (const auto mode : mirrored_modes) {
-    const auto enabled = terminal_mode_enabled(impl_->terminal, mode.mode);
-    if (!enabled.has_value()) {
-      impl_->ansi_physical_valid = false;
-      return std::unexpected(enabled.error());
+  if (!composed || focused) {
+    std::size_t mode_index = 0;
+    for (const auto mode : mirrored_modes) {
+      const auto enabled = terminal_mode_enabled(impl_->terminal, mode.mode);
+      if (!enabled.has_value()) {
+        impl_->ansi_physical_valid = false;
+        return std::unexpected(enabled.error());
+      }
+      auto& physical_value = std::span(impl_->mirrored_mode_values).subspan(mode_index, 1).front();
+      if ((composed || full || !impl_->mirrored_modes_valid || physical_value != *enabled) &&
+          (!writer.append("\x1B[?") || !writer.append_integer(mode.number) ||
+           !writer.append(*enabled ? "h" : "l"))) {
+        impl_->ansi_physical_valid = false;
+        return std::unexpected(Error::out_of_space);
+      }
+      physical_value = *enabled;
+      ++mode_index;
     }
-    auto& physical_value = std::span(impl_->mirrored_mode_values).subspan(mode_index, 1).front();
-    if ((full || !impl_->mirrored_modes_valid || physical_value != *enabled) &&
-        (!writer.append("\x1B[?") || !writer.append_integer(mode.number) ||
-         !writer.append(*enabled ? "h" : "l"))) {
-      impl_->ansi_physical_valid = false;
-      return std::unexpected(Error::out_of_space);
-    }
-    physical_value = *enabled;
-    ++mode_index;
+    impl_->mirrored_modes_valid = true;
   }
-  impl_->mirrored_modes_valid = true;
 
-  if (!writer.append("\x1B[?2026l")) {
+  if (!composed && !writer.append("\x1B[?2026l")) {
     impl_->ansi_physical_valid = false;
     return std::unexpected(Error::out_of_space);
   }

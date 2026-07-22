@@ -5,8 +5,8 @@ pinned `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstan
 bounded snapshots and application-owned compressed state.
 
 The current vertical slice provides up to 64 named persistent workspaces in one per-user daemon,
-each with one PTY terminal and start, attach, detach, list, and kill commands, plus release-enabled
-invariant assertions, generational
+each with a bounded split-pane tree and start, attach, detach, list, and kill commands, plus
+release-enabled invariant assertions, generational
 IDs, bounded byte queues,
 and an isolated Ghostty terminal adapter. The adapter owns the canonical terminal and dirty render
 state, captures terminal effects into bounded queues, and enforces a quota-tracked allocator. See
@@ -90,12 +90,18 @@ and multi-pane build-out plan.
 ./build/debug/fiber kill-all       # stop every workspace
 ```
 
-Each workspace currently owns one terminal and permits one attached client. It starts the account's
-login shell, inherits the daemon's launch environment, advertises `xterm-256color`, and forwards terminal
-resizing to the PTY. Workspace names contain 1-32 ASCII letters, digits, underscores, or hyphens.
-`C-b C-b`
-sends a literal `C-b`. Launch `fiber` directly from the normal shell rather
-than through `nix develop` when testing personal shell configuration.
+Each workspace permits one attached client and each pane owns its own login shell, PTY, and terminal.
+Fiber inherits the daemon's launch environment, advertises `xterm-256color`, and resizes pane PTYs
+from the split layout. Workspace names contain 1-32 ASCII letters, digits, underscores, or hyphens.
+The built-in key table follows tmux defaults:
+
+- `C-b %` splits left/right and `C-b "` splits top/bottom;
+- `C-b Arrow` or `C-b o` changes focus, and `C-b ;` returns to the previous pane;
+- `C-b x` closes the focused pane and `C-b z` toggles zoom;
+- `C-b d` detaches and `C-b C-b` sends a literal `C-b`.
+
+Launch `fiber` directly from the normal shell rather than through `nix develop` when testing
+personal shell configuration.
 
 ## Editor and commit hooks
 

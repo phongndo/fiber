@@ -1,8 +1,8 @@
 # Fiber architecture
 
 This document defines Fiber's intended architecture. It is a contract for contributors and coding
-agents, not a claim that every component already exists. The current executable is a single-pane
-runtime documented in [`single-pane-runtime.md`](single-pane-runtime.md).
+agents, not a claim that every component already exists. The current executable is a bounded
+split-pane runtime documented in [`single-pane-runtime.md`](single-pane-runtime.md).
 
 ## Product goal
 
