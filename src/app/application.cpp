@@ -104,10 +104,11 @@ template <typename Integer>
              stdout,
              "fiber\n\nCommands:\n  new [name]     start and attach\n  start [name]   "
              "start detached\n  attach [name]  attach\n  list [name]    list all or one\n  "
-             "kill [name]    stop one workspace\n  kill-all       stop every workspace\n  demo "
+             "windows [name] list windows\n  kill [name]    stop one workspace\n  kill-all       "
+             "stop every workspace\n  demo "
              "          "
              "VT demo\n\nThe default name is `default`. C-b % and C-b \" split panes; "
-             "C-b Arrow changes focus; C-b d detaches.\n")
+             "C-b c creates a window; C-b n/p changes windows; C-b d detaches.\n")
              ? 0
              : 1;
 }
@@ -128,6 +129,9 @@ template <typename Integer>
   }
   if (command == "list" || command == "ls" || command == "lookup") {
     return named ? daemon::list(workspace) : daemon::list();
+  }
+  if (command == "windows") {
+    return daemon::list_windows(workspace);
   }
   if (command == "kill") {
     return daemon::kill(workspace);

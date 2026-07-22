@@ -1,7 +1,9 @@
 #ifndef FIBER_PLATFORM_PTY_HPP
 #define FIBER_PLATFORM_PTY_HPP
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <sys/types.h>
 
@@ -13,6 +15,11 @@ namespace fiber::platform {
 
 [[nodiscard]] auto resize_pty(int pty_descriptor, std::uint16_t columns,
                               std::uint16_t rows) noexcept -> bool;
+
+// Returns the bounded process name for the PTY's foreground process group, or zero when the
+// foreground process cannot be inspected.
+[[nodiscard]] auto foreground_process_name(int pty_descriptor, std::span<char> output) noexcept
+    -> std::size_t;
 
 } // namespace fiber::platform
 

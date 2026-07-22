@@ -17,6 +17,7 @@ inline constexpr std::string_view default_workspace = "default";
 [[nodiscard]] auto start(std::string_view workspace = default_workspace) -> int;
 [[nodiscard]] auto list() -> int;
 [[nodiscard]] auto list(std::string_view workspace) -> int;
+[[nodiscard]] auto list_windows(std::string_view workspace = default_workspace) -> int;
 [[nodiscard]] auto kill(std::string_view workspace = default_workspace) -> int;
 [[nodiscard]] auto kill_all() -> int;
 

@@ -5,9 +5,9 @@ pinned `libghostty-vt` library. Lua 5.5 is the configuration language, and Zstan
 bounded snapshots and application-owned compressed state.
 
 The current vertical slice provides up to 64 named persistent workspaces in one per-user daemon,
-each with a bounded split-pane tree and start, attach, detach, list, and kill commands, plus
-release-enabled invariant assertions, generational
-IDs, bounded byte queues,
+each with up to 16 generationally identified windows and 64 panes distributed across them. It
+supports start, attach, detach, list, window-list, and kill commands, plus release-enabled invariant
+assertions, generational IDs, bounded byte queues,
 and an isolated Ghostty terminal adapter. The adapter owns the canonical terminal and dirty render
 state, captures terminal effects into bounded queues, and enforces a quota-tracked allocator. See
 [`docs/architecture.md`](docs/architecture.md) for the ownership model and system invariants, and
@@ -78,27 +78,35 @@ extension API. See [`docs/architecture.md`](docs/architecture.md) for the target
 [`docs/single-pane-runtime.md`](docs/single-pane-runtime.md) for its current ownership, limitations,
 and multi-pane build-out plan.
 
-## Single-pane mux
+## Workspace/window mux
 
 ```sh
 ./build/debug/fiber new work       # start workspace "work" and attach
 # Press C-b d to detach.
 ./build/debug/fiber new logs       # create another workspace in the same daemon
 ./build/debug/fiber list           # list all workspaces
+./build/debug/fiber windows work   # list work's windows
 ./build/debug/fiber attach work    # reattach to work
 ./build/debug/fiber kill work      # stop one workspace
 ./build/debug/fiber kill-all       # stop every workspace
 ```
 
-Each workspace permits one attached client and each pane owns its own login shell, PTY, and terminal.
-Fiber inherits the daemon's launch environment, advertises `xterm-256color`, and resizes pane PTYs
-from the split layout. Workspace names contain 1-32 ASCII letters, digits, underscores, or hyphens.
+Each workspace permits one attached client, owns an ordered set of windows, and gives each pane its
+own login shell, PTY, and terminal. Fiber inherits the daemon's launch environment, advertises
+`xterm-256color`, and resizes pane PTYs from the active window's split layout. Workspace names
+contain 1-32 ASCII letters, digits, underscores, or hyphens.
 The built-in key table follows tmux defaults:
 
 - `C-b %` splits left/right and `C-b "` splits top/bottom;
 - `C-b Arrow` or `C-b o` changes focus, and `C-b ;` returns to the previous pane;
 - `C-b x` closes the focused pane and `C-b z` toggles zoom;
-- `C-b d` detaches and `C-b C-b` sends a literal `C-b`.
+- `C-b c` creates a window, `C-b n`/`C-b p` cycles windows, `C-b 1` through `C-b 9`
+  selects windows 1-9, and `C-b 0` selects window 10;
+- `C-b &` kills the active window, `C-b d` detaches, and `C-b C-b` sends a literal `C-b`.
+
+A minimal reverse-video status row is centered at the bottom. It shows windows as
+`number:foreground-process`, brackets the active window (`[1:zsh]`), automatically follows the
+focused pane's foreground process, and uses `…` when the complete window list does not fit.
 
 Launch `fiber` directly from the normal shell rather than through `nix develop` when testing
 personal shell configuration.

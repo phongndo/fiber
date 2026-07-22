@@ -173,6 +173,41 @@ TEST(ProtocolTest, PrefixParserCapturesTmuxSplitsInInputOrder) {
   EXPECT_EQ(second_action.command, PaneCommand::split_top_bottom);
 }
 
+TEST(ProtocolTest, PrefixParserCapturesWindowCommandsInInputOrder) {
+  PrefixParser parser;
+  const std::array input{
+      std::byte{0x02}, std::byte{'c'},  std::byte{0x02}, std::byte{'n'},  std::byte{0x02},
+      std::byte{'p'},  std::byte{0x02}, std::byte{'&'},  std::byte{0x02}, std::byte{'3'},
+  };
+  std::array<std::byte, input.size() * 2U> output{};
+
+  const auto result = parser.parse(input, output);
+
+  EXPECT_EQ(result.bytes, 0U);
+  ASSERT_EQ(result.action_count, 5U);
+  const auto actions = std::span(result.actions);
+  EXPECT_EQ((actions.subspan<0, 1>().front().command), PaneCommand::create_window);
+  EXPECT_EQ((actions.subspan<1, 1>().front().command), PaneCommand::next_window);
+  EXPECT_EQ((actions.subspan<2, 1>().front().command), PaneCommand::previous_window);
+  EXPECT_EQ((actions.subspan<3, 1>().front().command), PaneCommand::kill_window);
+  EXPECT_EQ((actions.subspan<4, 1>().front().command), PaneCommand::select_window_3);
+}
+
+TEST(ProtocolTest, DecodesWindowCommandPacket) {
+  ClientDecoder decoder;
+  const auto packet = encode_pane_command(PaneCommand::select_window_9);
+  std::ranges::copy(packet, decoder.writable_bytes().begin());
+  ASSERT_TRUE(decoder.commit(packet.size()).has_value());
+
+  const auto decoded = decoder.next();
+
+  ASSERT_TRUE(decoded.has_value());
+  ASSERT_TRUE(decoded->has_value());
+  // value() turns malformed or incomplete test output into an explicit test exception.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(decoded.value().value().pane_command, PaneCommand::select_window_9);
+}
+
 TEST(ProtocolTest, PrefixParserCapturesFragmentedArrowKey) {
   PrefixParser parser;
   std::array<std::byte, 8> output{};

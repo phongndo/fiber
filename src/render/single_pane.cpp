@@ -14,8 +14,9 @@ namespace fiber::render {
 
 [[nodiscard]] auto send_composed_frame(const int client, const std::span<const PaneSurface> panes,
                                        const Viewport viewport, FrameBuffer& frame,
-                                       const bool force_full) noexcept -> bool {
-  const auto rendered = compose_frame(panes, viewport, frame, force_full);
+                                       const bool force_full, const StatusLine status) noexcept
+    -> bool {
+  const auto rendered = compose_frame(panes, viewport, frame, force_full, status);
   return rendered.has_value() &&
          platform::send_all(client, std::span(frame).first(rendered->bytes));
 }
@@ -55,10 +56,10 @@ namespace fiber::render {
 
 [[nodiscard]] auto queue_composed_frame(const int client, const std::span<const PaneSurface> panes,
                                         const Viewport viewport, FrameBuffer& frame,
-                                        ClientOutputState& output, const bool force_full) noexcept
-    -> bool {
+                                        ClientOutputState& output, const bool force_full,
+                                        const StatusLine status) noexcept -> bool {
   FIBER_ASSERT(!output.busy());
-  const auto rendered = compose_frame(panes, viewport, frame, force_full);
+  const auto rendered = compose_frame(panes, viewport, frame, force_full, status);
   if (!rendered.has_value()) {
     return false;
   }

@@ -39,6 +39,20 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
   case PaneCommand::focus_previous:
   case PaneCommand::close:
   case PaneCommand::zoom:
+  case PaneCommand::create_window:
+  case PaneCommand::next_window:
+  case PaneCommand::previous_window:
+  case PaneCommand::kill_window:
+  case PaneCommand::select_window_0:
+  case PaneCommand::select_window_1:
+  case PaneCommand::select_window_2:
+  case PaneCommand::select_window_3:
+  case PaneCommand::select_window_4:
+  case PaneCommand::select_window_5:
+  case PaneCommand::select_window_6:
+  case PaneCommand::select_window_7:
+  case PaneCommand::select_window_8:
+  case PaneCommand::select_window_9:
     return command;
   }
   return std::nullopt;
@@ -205,6 +219,30 @@ void encode_u16(const std::uint16_t value, const std::span<std::byte, 2> output)
       break;
     case std::byte{'z'}:
       pane_command = PaneCommand::zoom;
+      break;
+    case std::byte{'c'}:
+      pane_command = PaneCommand::create_window;
+      break;
+    case std::byte{'n'}:
+      pane_command = PaneCommand::next_window;
+      break;
+    case std::byte{'p'}:
+      pane_command = PaneCommand::previous_window;
+      break;
+    case std::byte{'&'}:
+      pane_command = PaneCommand::kill_window;
+      break;
+    case std::byte{'0'}:
+    case std::byte{'1'}:
+    case std::byte{'2'}:
+    case std::byte{'3'}:
+    case std::byte{'4'}:
+    case std::byte{'5'}:
+    case std::byte{'6'}:
+    case std::byte{'7'}:
+    case std::byte{'8'}:
+    case std::byte{'9'}:
+      pane_command = static_cast<PaneCommand>(std::to_integer<std::uint8_t>(byte));
       break;
     default:
       break;

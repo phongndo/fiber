@@ -2,10 +2,12 @@
 
 Home of Fiber's authoritative mux engine and dense state.
 
-The current engine owns up to 64 named workspaces and 4,096 panes in one reactor, bounded to 64
-panes per workspace. Every pane has one child process, PTY, terminal adapter, and resolved surface.
-Each workspace owns its binary split tree, focus/zoom state, attached client, input decoder, damage
-schedule, and frame deadline. The engine borrows the daemon's listener but does not own socket
+The current engine owns up to 64 named workspaces, 1,024 windows, and 4,096 panes in one reactor.
+Each workspace is bounded to 16 windows and 64 panes distributed across them. Every pane has one
+child process, PTY, terminal adapter, and resolved surface. Each generationally identified window
+owns its binary split tree and focus/zoom state. Each workspace owns its window order and active
+selection, attached client, input decoder, bounded status model/signature, damage schedule, and
+frame deadline. The engine borrows the daemon's listener but does not own socket
 paths, locks, daemonization, or terminal-client raw mode.
 
 As tasks, runs, and views are introduced, this component will move those values into generational

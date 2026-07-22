@@ -28,6 +28,7 @@ enum class ControlCommand : std::uint8_t {
   create = 'N',
   list = 'L',
   list_workspace = 'Q',
+  list_windows = 'W',
   kill = 'K',
   kill_all = 'X',
 };
@@ -52,6 +53,20 @@ enum class PaneCommand : std::uint8_t {
   focus_previous = ';',
   close = 'x',
   zoom = 'z',
+  create_window = 'c',
+  next_window = 'n',
+  previous_window = 'p',
+  kill_window = '&',
+  select_window_0 = '0',
+  select_window_1 = '1',
+  select_window_2 = '2',
+  select_window_3 = '3',
+  select_window_4 = '4',
+  select_window_5 = '5',
+  select_window_6 = '6',
+  select_window_7 = '7',
+  select_window_8 = '8',
+  select_window_9 = '9',
 };
 
 enum class ClientMessageKind : std::uint8_t {

@@ -49,7 +49,7 @@ using platform::write_text;
 }
 
 [[nodiscard]] auto socket_path() -> std::string {
-  return "/tmp/fiber-v5-" + std::to_string(::getuid()) + ".sock";
+  return "/tmp/fiber-v8-" + std::to_string(::getuid()) + ".sock";
 }
 
 [[nodiscard]] auto socket_address(const std::string& path) noexcept
@@ -356,6 +356,12 @@ auto list() -> int {
 auto list(const std::string_view workspace) -> int {
   return validate_workspace(workspace)
              ? run_control_command(protocol::ControlCommand::list_workspace, workspace, true)
+             : 1;
+}
+
+auto list_windows(const std::string_view workspace) -> int {
+  return validate_workspace(workspace)
+             ? run_control_command(protocol::ControlCommand::list_windows, workspace, true)
              : 1;
 }
 

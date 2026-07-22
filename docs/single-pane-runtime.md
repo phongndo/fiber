@@ -3,8 +3,8 @@
 ## Status
 
 Fiber's end-to-end vertical slice has been migrated out of the former monolithic
-`single_pane.cpp`. Workspaces now support bounded split panes while retaining the production
-component architecture:
+`single_pane.cpp`. Workspaces now support bounded windows and split panes while retaining the
+production component architecture:
 
 ```text
 apps/fiber/main.cpp
@@ -44,11 +44,13 @@ Workspace creation, lookup, listing, and removal are handled by the authoritativ
 
 ### Core — `src/core/`
 
-Owns up to 64 running workspaces and 4,096 panes in one reactor, with a per-workspace bound of 64
-panes. Every pane owns one child process, PTY, terminal, and resolved rectangle. The workspace owns
-its split tree, focus/zoom state, attached daemon-side client descriptor, protocol-message state,
-frame scheduling, and backpressure state. The reactor borrows the daemon listener and remains the
-sole owner of mutable workspace and terminal state.
+Owns up to 64 running workspaces, 1,024 windows, and 4,096 panes in one reactor. Each workspace is
+bounded to 16 windows and 64 panes distributed across those windows. Every pane owns one child
+process, PTY, terminal, and resolved rectangle. A generationally identified window owns its split
+tree and focus/zoom state. The workspace owns its ordered window slots, active-window selection,
+attached daemon-side client descriptor, protocol-message state, frame scheduling, and backpressure
+state. The reactor borrows the daemon listener and remains the sole owner of mutable workspace and
+terminal state.
 
 ### Supporting components
 
@@ -62,10 +64,13 @@ sole owner of mutable workspace and terminal state.
 The runtime currently provides:
 
 - up to 64 validated named workspaces in one per-user daemon;
-- up to 64 shells, PTYs, and canonical Ghostty terminals per workspace;
-- one attached client plus independent list/kill control connections;
-- tmux-compatible split, focus, close, zoom, detach, and literal-prefix bindings;
-- bounded binary split trees with one-cell pane separators;
+- up to 16 windows and 64 shells, PTYs, and canonical Ghostty terminals per workspace;
+- generational window IDs that reject stale slot references;
+- one attached client plus independent workspace/window-list and kill control connections;
+- tmux-compatible window create/cycle/select/kill and pane split/focus/close/zoom bindings;
+- one bounded binary split tree per window, with one-cell pane separators;
+- a centered, one-row window status with one-based numbers, focused-pane foreground process names,
+  and bounded overflow;
 - terminal resize propagation from resolved pane rectangles;
 - bounded protocol and PTY read batches;
 - terminal-generated PTY responses;
@@ -74,37 +79,43 @@ The runtime currently provides:
 - focused-pane cursor and outer-terminal mode ownership in the composition layer;
 - a 2 ms frame-coalescing deadline;
 - partial nonblocking live-frame writes;
-- full visible-state reconstruction on reattach;
+- full visible-state reconstruction on reattach and active-window changes;
+- PTY progress for inactive windows without rendering them;
 - deterministic child, descriptor, socket, and lock cleanup.
 
 ## Current limitations
 
-The architecture is migrated and the first split-pane behavior is implemented, with these
+The architecture is migrated and the first window/split-pane behavior is implemented, with these
 limitations:
 
-- workspaces have no separate task/view stores or generational pane IDs;
+- workspaces and panes do not yet use separate generational stores; windows use generational IDs
+  within their owning workspace;
 - only one client may attach at a time;
 - the local protocol has no version or capability negotiation;
 - listener acceptance and initial attach setup still use the vertical slice's simple policy;
 - new workspaces inherit the daemon's original environment and working directory;
 - extension commands/events and configurable key tables are not integrated;
+- windows have numeric slots but no user-defined names or interactive rename prompt;
+- windows cannot be linked across workspaces;
 - pane ratios are fixed at equal halves and cannot yet be resized interactively;
-- alternate tmux layouts, pane-number overlays, status rows, and per-client physical state are not
-  yet implemented.
+- alternate tmux layouts, pane-number overlays, and per-client physical state are not yet
+  implemented.
 
 These are feature and runtime-hardening tasks, not reasons to reorganize the source tree again.
 
 ## Build-out sequence
 
-1. Introduce dense generational stores for workspaces, tasks, runs, views, and clients.
+1. Move workspaces, panes, and clients into dense generational stores; window IDs are already
+   generational within each workspace.
 2. Represent topology and lifecycle changes as typed core commands.
-3. Generalize listener integration to multiple pending clients without blocking workspace progress.
-4. Replace the rebuilt poll set with the descriptor registry/reactor abstraction.
-5. Move split topology into generational view/pane stores and add per-client viewport state.
-6. Add adjustable ratios, alternate layouts, pane-number overlays, and status surfaces.
-7. Version the protocol and add capabilities, request IDs, and typed errors.
-8. Add deferred, budgeted extension commands and immutable events.
-9. Add replay traces, capacity tests, fuzzing, and end-to-end latency benchmarks.
+3. Add window naming/rename management and optional status configuration.
+4. Generalize listener integration to multiple pending clients without blocking workspace progress.
+5. Replace the rebuilt poll set with the descriptor registry/reactor abstraction.
+6. Move split topology into generational pane stores and add per-client viewport state.
+7. Add adjustable ratios, alternate layouts, pane-number overlays, and status surfaces.
+8. Version the protocol and add capabilities, request IDs, and typed errors.
+9. Add deferred, budgeted extension commands and immutable events.
+10. Add replay traces, capacity tests, fuzzing, and end-to-end latency benchmarks.
 
 ## Rules for contributors and agents
 

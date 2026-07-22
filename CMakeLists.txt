@@ -169,13 +169,21 @@ if(FIBER_BUILD_TESTS)
     tests/core_input_test.cpp
     tests/core_test.cpp
     tests/fiber_test.cpp
+    tests/platform_test.cpp
     tests/protocol_test.cpp
     tests/render_composition_test.cpp
     tests/terminal_test.cpp
   )
   target_link_libraries(
     fiber_tests
-    PRIVATE fiber::lib fiber_protocol fiber_render fiber_warnings GTest::gtest_main GTest::gmock
+    PRIVATE
+      fiber::lib
+      fiber_platform
+      fiber_protocol
+      fiber_render
+      fiber_warnings
+      GTest::gtest_main
+      GTest::gmock
   )
   gtest_discover_tests(fiber_tests)
 endif()

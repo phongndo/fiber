@@ -33,12 +33,12 @@ struct ClientOutputState final {
                                ClientOutputState& output) noexcept -> bool;
 
 [[nodiscard]] auto send_composed_frame(int client, std::span<const PaneSurface> panes,
-                                       Viewport viewport, FrameBuffer& frame,
-                                       bool force_full) noexcept -> bool;
+                                       Viewport viewport, FrameBuffer& frame, bool force_full,
+                                       StatusLine status = {}) noexcept -> bool;
 [[nodiscard]] auto queue_composed_frame(int client, std::span<const PaneSurface> panes,
                                         Viewport viewport, FrameBuffer& frame,
-                                        ClientOutputState& output, bool force_full) noexcept
-    -> bool;
+                                        ClientOutputState& output, bool force_full,
+                                        StatusLine status = {}) noexcept -> bool;
 
 } // namespace fiber::render
 

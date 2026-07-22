@@ -6,8 +6,8 @@ The current protocol is the bounded local wire format used by the runtime. Its i
 remains in `src/protocol/single_pane.*` for now so framing can be tested independently of sockets and
 terminal state. It is not yet the final generalized protocol and currently has no version
 negotiation; incompatible changes must therefore remain coordinated between the daemon and client.
-This pane-command revision uses the `fiber-v5-<uid>.sock` endpoint so it cannot attach to an older
-single-pane daemon.
+This process-named status revision uses the `fiber-v8-<uid>.sock` endpoint so it cannot attach to an
+older daemon that does not reserve or refresh the status row correctly.
 
 All integers are unsigned big-endian. Message type values are one ASCII byte for diagnostics only;
 they must be treated as binary enum values, not text.
@@ -22,6 +22,7 @@ A newly accepted connection starts with exactly one control command:
 | create | `N` | name length, name | Ensure one workspace exists |
 | list | `L` | none | List every workspace and close |
 | list workspace | `Q` | name length, name | List one workspace and close |
+| list windows | `W` | name length, name | List one workspace's windows and close |
 | kill | `K` | name length, name | Stop one workspace and close |
 | kill all | `X` | none | Stop every workspace and close |
 
@@ -78,9 +79,10 @@ canonical terminal state. Both operations must succeed.
    1 B           1 B
 ```
 
-The command byte is a closed enum for left/right and top/bottom splits, directional/next/previous
-focus, close, and zoom. Unknown values terminate the attached connection as protocol errors. The
-core applies commands only to the attached workspace and its focused pane.
+The command byte is a closed enum for window create/next/previous/select/kill and pane left/right or
+top/bottom splits, directional/next/previous focus, close, and zoom. Unknown values terminate the
+attached connection as protocol errors. The core applies commands only to the attached workspace
+and its active window.
 
 ### Detach
 
@@ -117,7 +119,10 @@ The attached client currently recognizes a fixed tmux-compatible `C-b` prefix:
 
 - `C-b %` and `C-b "` emit left/right and top/bottom split commands;
 - `C-b Arrow`, `C-b o`, and `C-b ;` emit focus commands;
-- `C-b x` and `C-b z` emit close and zoom commands;
+- `C-b x` and `C-b z` emit pane close and zoom commands;
+- `C-b c`, `C-b n`, and `C-b p` create, select the next, or select the previous window;
+- `C-b 1` through `C-b 9` select windows 1-9, `C-b 0` selects window 10, and `C-b &`
+  kills the active window;
 - `C-b d` emits a detach message;
 - `C-b C-b` emits one literal `C-b` input byte;
 - unknown keys forward the literal prefix and key.

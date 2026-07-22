@@ -4,7 +4,7 @@ Start here:
 
 - [`architecture.md`](architecture.md) — target architecture, ownership, dependencies, hot-path
   rules, and extension boundary.
-- [`single-pane-runtime.md`](single-pane-runtime.md) — current runtime ownership, split-pane
+- [`single-pane-runtime.md`](single-pane-runtime.md) — current runtime ownership, window/split-pane
   behavior, limitations, and build-out plan.
 - [`protocol.md`](protocol.md) — current local wire format, parser contract, and evolution rules.
 - [`performance.md`](performance.md) — benchmark methodology and current results.
